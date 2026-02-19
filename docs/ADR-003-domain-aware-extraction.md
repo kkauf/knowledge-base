@@ -1,7 +1,7 @@
 # ADR-003: Domain-Aware Extraction & Graph-Based Retrieval
 
 **Date:** 2026-02-19
-**Status:** Proposed
+**Status:** Accepted (steps 1-4 implemented 2026-02-19, step 5 deferred)
 **Context:** After backfilling 215 sessions (915 entities, 1273 facts), two problems surfaced:
 1. BRIEF.md is 3,069 lines — unusable as passive context (target: ~50 lines)
 2. Entity duplication — same real-world entity gets multiple names ("KEARTH", "KH", "Kaufmann Health") because the extraction model has no context about what already exists
