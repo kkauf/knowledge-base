@@ -2,7 +2,7 @@
 """
 Extraction pipeline — extract structured facts from Claude Code session transcripts.
 
-Uses a cheap model via OpenRouter (Gemini Flash) to identify:
+Uses a cheap model via OpenRouter (Qwen 3.5) to identify:
 - New entities (people, projects, companies, features)
 - New or changed facts
 - New relations between entities
@@ -26,7 +26,7 @@ from pathlib import Path
 
 DB_PATH = os.path.expanduser("~/.claude/knowledge/knowledge.db")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "google/gemini-3-flash-preview"
+DEFAULT_MODEL = "qwen/qwen3.5-397b-a17b"
 
 EXTRACTION_PROMPT = """You are a knowledge extraction system. Your job is to identify durable facts, decisions, and relationships from a conversation transcript.
 
