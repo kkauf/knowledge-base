@@ -1,5 +1,8 @@
-*.db
-*.env
-*.env.local
 __pycache__/
-.claude/
+*.pyc
+*.db
+.last-extraction
+extraction.log
+launchd-stdout.log
+launchd-stderr.log
+BRIEF.md
