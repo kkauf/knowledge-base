@@ -247,16 +247,20 @@ def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL, domain_co
         sys.exit(2)
 
 
-def upsert_extractions(db: sqlite3.Connection, extractions: dict, source: str, date: str):
+def upsert_extractions(db: sqlite3.Connection, extractions: dict, source: str, date: str, domain: str = None):
     """Write extracted knowledge into the database."""
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     stats = {"entities": 0, "facts": 0, "relations": 0, "decisions": 0, "superseded": 0}
+
+    VALID_TYPES = {'person', 'project', 'company', 'concept', 'feature', 'tool'}
 
     # 1. Ensure all entities exist
     entity_map = {}  # name -> id
     for ent in extractions.get("entities", []):
         name = ent["name"]
-        etype = ent.get("type", "concept")
+        etype = ent.get("type", "concept").lower().strip()
+        if etype not in VALID_TYPES:
+            etype = "concept"  # Default for unknown types
 
         existing = db.execute(
             "SELECT * FROM entities WHERE lower(name) = lower(?)", (name,)
@@ -273,6 +277,13 @@ def upsert_extractions(db: sqlite3.Connection, extractions: dict, source: str, d
             )
             entity_map[name.lower()] = eid
             stats["entities"] += 1
+
+            # Assign domain to new entity
+            if domain:
+                db.execute(
+                    "INSERT OR IGNORE INTO entity_domains (entity_id, domain, confidence, source) VALUES (?, ?, 1.0, 'extraction')",
+                    (eid, domain)
+                )
 
     # 2. Assert facts
     for fact in extractions.get("facts", []):
@@ -297,6 +308,12 @@ def upsert_extractions(db: sqlite3.Connection, extractions: dict, source: str, d
                 )
                 entity_map[entity_name.lower()] = eid
                 stats["entities"] += 1
+
+                if domain:
+                    db.execute(
+                        "INSERT OR IGNORE INTO entity_domains (entity_id, domain, confidence, source) VALUES (?, ?, 1.0, 'extraction')",
+                        (eid, domain)
+                    )
 
         # Supersede existing fact for same entity+attribute
         existing_fact = db.execute(
@@ -518,7 +535,7 @@ def main():
     # Write to DB
     print()
     db = get_db()
-    stats = upsert_extractions(db, extractions, source, date)
+    stats = upsert_extractions(db, extractions, source, date, domain=domain)
     db.close()
 
     print(f"Written: {stats['entities']} new entities, {stats['facts']} facts ({stats['superseded']} superseded), {stats['relations']} relations, {stats['decisions']} decisions")
