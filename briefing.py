@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 DB_PATH = os.path.expanduser("~/.claude/knowledge/knowledge.db")
 BRIEF_PATH = os.path.expanduser("~/.claude/knowledge/BRIEF.md")
 
-# Domain detection from source field patterns
+# Domain detection from source field patterns (used for new facts without entity_domains entry)
 DOMAIN_RULES = [
     ("KH", ["kaufmann-health", "kaufmann/health", "kaufmann%health"]),
     ("Personal", ["Personal-Support", "Personal/Support", "cornell", "email-katherine"]),
@@ -20,6 +20,8 @@ DOMAIN_RULES = [
     ("IsAI", ["IsAIConsciousYet", "isai"]),
     ("Infrastructure", ["claude-sessions", "knowledge-base", "kkauf"]),
 ]
+
+DOMAIN_ORDER = ["KH", "Personal", "Infrastructure", "VSS", "IsAI", "Other"]
 
 
 def detect_domain(source: str) -> str:
@@ -57,35 +59,50 @@ def generate():
     lines.append(f"# Knowledge Brief ({entity_count} entities, {fact_count} facts)")
     lines.append("")
 
-    # --- Domain summary table ---
-    # Build domain stats from source field on facts
-    domain_stats = {}  # domain -> {entities: set, facts: int, latest_fact: str}
-    facts_with_source = db.execute("""
-        SELECT f.entity_id, f.source, f.attribute, f.value, f.created_at, e.name
-        FROM facts f JOIN entities e ON f.entity_id = e.id
-        WHERE f.valid_to IS NULL
-        ORDER BY f.created_at DESC
-    """).fetchall()
+    # --- Domain summary from entity_domains table ---
+    has_domains = db.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='entity_domains'"
+    ).fetchone()[0] > 0
 
-    for row in facts_with_source:
-        domain = detect_domain(row['source'] or '')
-        if domain not in domain_stats:
-            domain_stats[domain] = {"entities": set(), "facts": 0, "latest_entity": None, "latest_date": None}
-        domain_stats[domain]["entities"].add(row['entity_id'])
-        domain_stats[domain]["facts"] += 1
-        if domain_stats[domain]["latest_entity"] is None:
-            # First row per domain is latest (ordered by created_at DESC)
-            domain_stats[domain]["latest_entity"] = row['name']
-            domain_stats[domain]["latest_date"] = row['created_at'][:10] if row['created_at'] else ""
+    domain_stats = {}
+    if has_domains:
+        for row in db.execute("""
+            SELECT ed.domain,
+                   COUNT(DISTINCT ed.entity_id) as entities,
+                   COUNT(f.id) as facts,
+                   MAX(f.created_at) as latest_at
+            FROM entity_domains ed
+            LEFT JOIN facts f ON f.entity_id = ed.entity_id AND f.valid_to IS NULL
+            WHERE ed.confidence >= 0.5
+            GROUP BY ed.domain
+            ORDER BY facts DESC
+        """):
+            domain_stats[row['domain']] = {
+                "entities": row['entities'],
+                "facts": row['facts'],
+                "latest_at": row['latest_at'],
+            }
+
+        # Get latest entity name per domain
+        for domain in domain_stats:
+            latest = db.execute("""
+                SELECT e.name FROM entity_domains ed
+                JOIN entities e ON ed.entity_id = e.id
+                JOIN facts f ON f.entity_id = e.id AND f.valid_to IS NULL
+                WHERE ed.domain = ? AND ed.confidence >= 0.5
+                ORDER BY f.created_at DESC LIMIT 1
+            """, (domain,)).fetchone()
+            domain_stats[domain]["latest_entity"] = latest['name'] if latest else ""
 
     lines.append("## Domains")
     lines.append("| Region | Entities | Facts | Last updated |")
     lines.append("|--------|----------|-------|--------------|")
-    for domain in ["KH", "Personal", "Infrastructure", "VSS", "IsAI", "Other"]:
+    for domain in DOMAIN_ORDER:
         if domain in domain_stats:
             s = domain_stats[domain]
-            latest = f"{s['latest_entity']} ({s['latest_date']})" if s['latest_entity'] else ""
-            lines.append(f"| {domain} | {len(s['entities'])} | {s['facts']} | {latest} |")
+            date = s['latest_at'][:10] if s['latest_at'] else ""
+            latest = f"{s['latest_entity']} ({date})" if s['latest_entity'] else ""
+            lines.append(f"| {domain} | {s['entities']} | {s['facts']} | {latest} |")
     lines.append("")
 
     # --- Key Numbers (high-value metrics from top entities) ---
@@ -134,45 +151,29 @@ def generate():
     MAX_ENTITIES_PER_DOMAIN = 5
     MAX_FACTS_PER_ENTITY = 3
 
-    # Get entities ranked by fact count, grouped by domain
-    entity_domain_map = {}  # entity_id -> primary domain (from most-facts source)
-    for row in facts_with_source:
-        eid = row['entity_id']
-        domain = detect_domain(row['source'] or '')
-        if eid not in entity_domain_map:
-            entity_domain_map[eid] = {}
-        entity_domain_map[eid][domain] = entity_domain_map[eid].get(domain, 0) + 1
+    for domain in DOMAIN_ORDER:
+        if domain not in domain_stats:
+            continue
 
-    # Resolve primary domain per entity
-    entity_primary_domain = {}
-    for eid, domains in entity_domain_map.items():
-        entity_primary_domain[eid] = max(domains, key=domains.get)
+        if has_domains:
+            top = db.execute("""
+                SELECT e.id, e.name, e.type, COUNT(f.id) as fact_count
+                FROM entity_domains ed
+                JOIN entities e ON ed.entity_id = e.id
+                JOIN facts f ON f.entity_id = e.id AND f.valid_to IS NULL
+                WHERE ed.domain = ? AND ed.confidence >= 0.5
+                GROUP BY e.id
+                ORDER BY fact_count DESC
+                LIMIT ?
+            """, (domain, MAX_ENTITIES_PER_DOMAIN)).fetchall()
+        else:
+            top = []
 
-    # Get top entities by fact count
-    top_entities = db.execute("""
-        SELECT e.id, e.name, e.type, COUNT(f.id) as fact_count
-        FROM entities e
-        JOIN facts f ON f.entity_id = e.id AND f.valid_to IS NULL
-        GROUP BY e.id
-        ORDER BY fact_count DESC
-    """).fetchall()
-
-    # Group by domain
-    domain_entities = {}  # domain -> [(name, type, fact_count, entity_id)]
-    for e in top_entities:
-        domain = entity_primary_domain.get(e['id'], 'Other')
-        if domain not in domain_entities:
-            domain_entities[domain] = []
-        if len(domain_entities[domain]) < MAX_ENTITIES_PER_DOMAIN:
-            domain_entities[domain].append(e)
-
-    for domain in ["KH", "Personal", "Infrastructure", "VSS", "IsAI", "Other"]:
-        entities = domain_entities.get(domain, [])
-        if not entities:
+        if not top:
             continue
 
         lines.append(f"## {domain}")
-        for e in entities:
+        for e in top:
             facts = db.execute("""
                 SELECT attribute, value FROM facts
                 WHERE entity_id = ? AND valid_to IS NULL
@@ -187,7 +188,7 @@ def generate():
     # --- Footer ---
     lines.append("---")
     lines.append(f"*{relation_count} relations, {decision_count} active decisions.*")
-    lines.append(f"*Deep lookup: `kb.py query \"entity\"` | `kb.py search \"term\"` | `kb.py decisions`*")
+    lines.append(f"*Deep lookup: `kb.py query \"entity\"` | `kb.py search \"term\"` | `kb.py domain \"KH\"`*")
 
     db.close()
 

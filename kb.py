@@ -381,6 +381,62 @@ def cmd_status(args):
     db.close()
 
 
+def cmd_domain(args):
+    """List entities in a domain with their top facts."""
+    db = get_db()
+    # Normalize domain name (case-insensitive lookup)
+    domain_map = {"kh": "KH", "personal": "Personal", "infrastructure": "Infrastructure",
+                  "vss": "VSS", "isai": "IsAI", "other": "Other"}
+    domain = domain_map.get(args.domain.lower(), args.domain)
+
+    # Check if entity_domains table exists
+    has_table = db.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='entity_domains'"
+    ).fetchone()[0]
+
+    if not has_table:
+        print("Error: entity_domains table not found. Run migrate-domains.py first.", file=sys.stderr)
+        sys.exit(2)
+
+    entities = db.execute("""
+        SELECT e.id, e.name, e.type, ed.confidence, COUNT(f.id) as fact_count
+        FROM entity_domains ed
+        JOIN entities e ON ed.entity_id = e.id
+        LEFT JOIN facts f ON f.entity_id = e.id AND f.valid_to IS NULL
+        WHERE ed.domain = ?
+        GROUP BY e.id
+        ORDER BY fact_count DESC
+    """, (domain,)).fetchall()
+
+    if not entities:
+        print(f"No entities in domain '{domain}'")
+        print(f"Available domains: KH, Personal, Infrastructure, VSS, IsAI, Other")
+        sys.exit(1)
+
+    print(f"\n  Domain: {domain} ({len(entities)} entities)")
+    print(f"  {'='*60}")
+
+    max_facts = args.facts if hasattr(args, 'facts') else 3
+
+    for e in entities:
+        conf = f" [{e['confidence']:.0%}]" if e['confidence'] < 1.0 else ""
+        print(f"\n  **{e['name']}** ({e['type']}, {e['fact_count']}f){conf}")
+
+        if max_facts > 0:
+            facts = db.execute("""
+                SELECT attribute, value FROM facts
+                WHERE entity_id = ? AND valid_to IS NULL
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (e['id'], max_facts)).fetchall()
+
+            for f in facts:
+                val = f['value'][:80] if len(f['value']) > 80 else f['value']
+                print(f"    {f['attribute']}: {val}")
+
+    db.close()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Knowledge Base CLI — query and manage semantic knowledge",
@@ -422,6 +478,11 @@ def main():
     # status
     subparsers.add_parser('status', help='Show KB health: daemon, last extraction, stats')
 
+    # domain
+    p_domain = subparsers.add_parser('domain', help='List entities in a domain (brain region)')
+    p_domain.add_argument('domain', help='Domain name: KH, Personal, Infrastructure, VSS, IsAI, Other')
+    p_domain.add_argument('--facts', type=int, default=3, help='Max facts per entity (default: 3, 0=names only)')
+
     args = parser.parse_args()
 
     commands = {
@@ -432,6 +493,7 @@ def main():
         'assert': cmd_assert,
         'decide': cmd_decide,
         'status': cmd_status,
+        'domain': cmd_domain,
     }
 
     commands[args.command](args)
