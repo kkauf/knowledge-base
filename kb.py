@@ -291,6 +291,94 @@ def cmd_decide(args):
     db.close()
 
 
+def cmd_status(args):
+    """Show KB health: daemon status, last extraction, DB stats."""
+    import subprocess
+    kb_dir = os.path.expanduser("~/.claude/knowledge")
+    marker_path = os.path.join(kb_dir, ".last-extraction")
+    log_path = os.path.join(kb_dir, "extraction.log")
+    brief_path = os.path.join(kb_dir, "BRIEF.md")
+
+    print("\n  Knowledge Base Status")
+    print(f"  {'='*50}")
+
+    # 1. Last extraction time
+    if os.path.exists(marker_path):
+        with open(marker_path) as f:
+            last_epoch = int(f.read().strip())
+        last_dt = datetime.fromtimestamp(last_epoch, tz=timezone.utc)
+        age_secs = int((datetime.now(timezone.utc) - last_dt).total_seconds())
+        if age_secs < 3600:
+            age_str = f"{age_secs // 60}m ago"
+        elif age_secs < 86400:
+            age_str = f"{age_secs // 3600}h ago"
+        else:
+            age_str = f"{age_secs // 86400}d ago"
+        healthy = age_secs < 7200  # <2h = healthy (daemon runs every 30m)
+        indicator = "OK" if healthy else "STALE"
+        print(f"\n  Last extraction: {last_dt.strftime('%Y-%m-%d %H:%M UTC')} ({age_str}) [{indicator}]")
+    else:
+        print(f"\n  Last extraction: NEVER (marker file missing)")
+
+    # 2. Daemon status
+    try:
+        result = subprocess.run(
+            ["launchctl", "print", f"gui/{os.getuid()}/com.kaufmann.kb-extract"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            print(f"  Daemon: LOADED (launchd, every 30m)")
+        else:
+            print(f"  Daemon: NOT LOADED")
+    except Exception:
+        print(f"  Daemon: UNKNOWN (couldn't check launchctl)")
+
+    # 3. BRIEF.md age
+    if os.path.exists(brief_path):
+        brief_mtime = os.path.getmtime(brief_path)
+        brief_dt = datetime.fromtimestamp(brief_mtime, tz=timezone.utc)
+        brief_age = int((datetime.now(timezone.utc) - brief_dt).total_seconds())
+        if brief_age < 3600:
+            brief_age_str = f"{brief_age // 60}m ago"
+        elif brief_age < 86400:
+            brief_age_str = f"{brief_age // 3600}h ago"
+        else:
+            brief_age_str = f"{brief_age // 86400}d ago"
+        print(f"  BRIEF.md: {brief_age_str}")
+    else:
+        print(f"  BRIEF.md: MISSING")
+
+    # 4. DB stats
+    db = get_db()
+    entity_count = db.execute("SELECT COUNT(*) as c FROM entities").fetchone()['c']
+    fact_count = db.execute("SELECT COUNT(*) as c FROM facts WHERE valid_to IS NULL").fetchone()['c']
+    superseded = db.execute("SELECT COUNT(*) as c FROM facts WHERE valid_to IS NOT NULL").fetchone()['c']
+    decision_count = db.execute("SELECT COUNT(*) as c FROM decisions WHERE status = 'active'").fetchone()['c']
+    relation_count = db.execute("SELECT COUNT(*) as c FROM relations WHERE valid_to IS NULL").fetchone()['c']
+
+    # Facts added in last 7 days
+    week_ago = (datetime.now(timezone.utc)).strftime('%Y-%m-%d')
+    recent_facts = db.execute(
+        "SELECT COUNT(*) as c FROM facts WHERE created_at > datetime('now', '-7 days')"
+    ).fetchone()['c']
+
+    print(f"\n  DB: {entity_count} entities, {fact_count} facts, {relation_count} relations, {decision_count} decisions")
+    print(f"  This week: {recent_facts} new facts, {superseded} total superseded")
+
+    # 5. Last 5 log lines
+    if os.path.exists(log_path):
+        with open(log_path) as f:
+            lines = f.readlines()
+        recent = lines[-5:] if len(lines) >= 5 else lines
+        if recent:
+            print(f"\n  Recent log:")
+            for line in recent:
+                print(f"    {line.rstrip()}")
+
+    print()
+    db.close()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Knowledge Base CLI — query and manage semantic knowledge",
@@ -329,6 +417,9 @@ def main():
     p_decide.add_argument('--rationale', help='Why this decision was made')
     p_decide.add_argument('--context', help='Related context or entity names')
 
+    # status
+    subparsers.add_parser('status', help='Show KB health: daemon, last extraction, stats')
+
     args = parser.parse_args()
 
     commands = {
@@ -338,6 +429,7 @@ def main():
         'entities': cmd_entities,
         'assert': cmd_assert,
         'decide': cmd_decide,
+        'status': cmd_status,
     }
 
     commands[args.command](args)
