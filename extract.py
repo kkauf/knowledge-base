@@ -65,6 +65,74 @@ Rules:
 - Respond with ONLY the JSON object. No explanations, no markdown, no code fences."""
 
 
+def detect_session_domain(session_path: str) -> str:
+    """Detect domain from session project path."""
+    path_lower = session_path.lower() if session_path else ""
+    if "kaufmann-health" in path_lower or "kaufmann/health" in path_lower:
+        return "KH"
+    if "personal-support" in path_lower or "personal/support" in path_lower:
+        return "Personal"
+    if "vss" in path_lower:
+        return "VSS"
+    if "isai" in path_lower or "isaiconsciousyet" in path_lower:
+        return "IsAI"
+    if "claude-sessions" in path_lower or "knowledge-base" in path_lower or "kkauf" in path_lower:
+        return "Infrastructure"
+    return None  # Unknown — skip context injection
+
+
+def load_domain_context(db: sqlite3.Connection, domain: str, max_entities: int = 100) -> str:
+    """Load known entities in a domain for context-aware extraction.
+
+    Returns a text block to inject into the extraction prompt so the model
+    reuses existing entity names and knows about existing facts.
+    """
+    # Check if entity_domains table exists
+    has_table = db.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='entity_domains'"
+    ).fetchone()[0]
+
+    if not has_table:
+        return ""
+
+    # Get top entities in this domain by fact count
+    entities = db.execute("""
+        SELECT e.id, e.name, e.type, COUNT(f.id) as fact_count
+        FROM entity_domains ed
+        JOIN entities e ON ed.entity_id = e.id
+        LEFT JOIN facts f ON f.entity_id = e.id AND f.valid_to IS NULL
+        WHERE ed.domain = ?
+        GROUP BY e.id
+        ORDER BY fact_count DESC
+        LIMIT ?
+    """, (domain, max_entities)).fetchall()
+
+    if not entities:
+        return ""
+
+    lines = [f"Known entities in the '{domain}' domain (reuse these names exactly):"]
+    for e in entities:
+        # Get top 3 facts for context
+        facts = db.execute("""
+            SELECT attribute, value FROM facts
+            WHERE entity_id = ? AND valid_to IS NULL
+            ORDER BY created_at DESC LIMIT 3
+        """, (e['id'],)).fetchall()
+
+        fact_str = ", ".join(f"{f['attribute']}={f['value'][:40]}" for f in facts)
+        entry = f"- {e['name']} ({e['type']})"
+        if fact_str:
+            entry += f" [{fact_str}]"
+        lines.append(entry)
+
+    lines.append("")
+    lines.append("If a fact updates an existing value, use the SAME entity name and attribute")
+    lines.append("so the database supersedes the old value automatically.")
+    lines.append("Only create a new entity if it genuinely doesn't exist above.")
+
+    return "\n".join(lines)
+
+
 def get_api_key() -> str:
     """Get OpenRouter API key from env or secrets file."""
     key = os.environ.get("OPENROUTER_API_KEY")
@@ -109,15 +177,22 @@ def get_db():
     return conn
 
 
-def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL) -> dict:
+def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL, domain_context: str = "") -> dict:
     """Call OpenRouter to extract structured knowledge from a transcript."""
     api_key = get_api_key()
+
+    # Build user message with optional domain context
+    user_parts = []
+    if domain_context:
+        user_parts.append(domain_context)
+        user_parts.append("")
+    user_parts.append("Extract knowledge from this transcript:\n\n" + transcript)
 
     payload = json.dumps({
         "model": model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": "Extract knowledge from this transcript:\n\n" + transcript}
+            {"role": "user", "content": "\n".join(user_parts)}
         ],
         "temperature": 0.3,
     }).encode("utf-8")
@@ -304,8 +379,12 @@ def upsert_extractions(db: sqlite3.Connection, extractions: dict, source: str, d
     return stats
 
 
-def find_last_session() -> str:
-    """Find the most recent Claude Code session transcript."""
+def find_last_session() -> tuple[str, str]:
+    """Find the most recent Claude Code session transcript.
+
+    Returns (transcript, session_path) where session_path includes the project path
+    for domain detection.
+    """
     # Claude Code stores sessions in ~/.claude/projects/
     projects_dir = Path.home() / ".claude" / "projects"
     if not projects_dir.exists():
@@ -348,7 +427,8 @@ def find_last_session() -> str:
             except json.JSONDecodeError:
                 continue
 
-    return "\n\n".join(messages[-50:])  # Last 50 messages to stay within model limits
+    transcript = "\n\n".join(messages[-50:])  # Last 50 messages to stay within model limits
+    return transcript, str(latest)
 
 
 def main():
@@ -375,8 +455,8 @@ def main():
             transcript = f.read()
         source = args.source or f"file:{os.path.basename(args.input)}"
     elif args.last_session:
-        transcript = find_last_session()
-        source = args.source or "claude-session"
+        transcript, session_path = find_last_session()
+        source = args.source or session_path
     elif args.stdin:
         transcript = sys.stdin.read()
         source = args.source or "stdin"
@@ -394,10 +474,20 @@ def main():
 
     print(f"Extracting from {len(transcript)} chars of transcript...")
     print(f"Model: {args.model} | Source: {source} | Date: {date}")
+
+    # Context-aware extraction: detect domain and load known entities
+    domain_context = ""
+    domain = detect_session_domain(source)
+    if domain:
+        db = get_db()
+        domain_context = load_domain_context(db, domain)
+        db.close()
+        if domain_context:
+            print(f"Domain: {domain} (injecting {domain_context.count(chr(10))} lines of context)")
     print()
 
     # Extract
-    extractions = call_extraction_model(transcript, args.model)
+    extractions = call_extraction_model(transcript, args.model, domain_context)
 
     # Display
     print("Extracted:")
