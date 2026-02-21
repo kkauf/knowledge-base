@@ -55,7 +55,7 @@ RECONCILIATION_PROMPT = """You are a reconciliation system for a personal knowle
 
 You receive:
 1. ARTIFACTS extracted from conversation transcripts (structured work products with full content)
-2. CURRENT STATE of the user's task board (Konban) and knowledge base
+2. CURRENT STATE of the user's task board (Konban), knowledge base, and recent git commits
 
 Your job: determine what actions should be taken to reconcile the artifacts with current state.
 
@@ -138,8 +138,16 @@ PERMISSION MODEL (strict):
 
 DONE_KONBAN_TASK rules:
 - Only propose done_konban_task when evidence is EXPLICIT: "shipped", "deployed", "committed", "sent", "done", or you see the actual tool call (konban done, git push) in the transcript.
+- Git commits are the STRONGEST done signal. A commit message like "fix(portal): accept 4-5 digit postal codes" + a Konban task "PLZ validation fix" = high confidence done. Commits prefixed with "Ship:" indicate production deployment.
 - Always include the evidence in the "content" field (e.g., "Committed as af6b665 and deployed to production").
 - The executor will REJECT done_konban_task unless confidence is "high".
+
+GIT HISTORY usage:
+- The system state includes recent git commits across active repos.
+- Use commits to corroborate artifact claims: if an artifact says "shipped X" and git shows a matching commit, confidence is HIGH.
+- Use commits to detect staleness: if an artifact recommends "fix Y" but git already shows a commit fixing Y, the artifact is stale.
+- Commits prefixed with "Ship:" were deployed to production. Other commits may be staging-only.
+- Match commits to Konban tasks by topic (fuzzy match on subject matter, not exact title match).
 
 Return ONLY valid JSON:
 {
@@ -212,6 +220,31 @@ def load_recent_decisions() -> str:
     return output or "[No recent decisions]"
 
 
+GIT_REPOS = [
+    Path.home() / "github" / "kaufmann-health",
+    Path.home() / "github" / "knowledge-base",
+]
+
+
+def load_git_history(days: int = 3) -> str:
+    """Load recent git commit history across tracked repos."""
+    sections = []
+    for repo in GIT_REPOS:
+        if not (repo / ".git").exists():
+            continue
+        output = run_cmd(
+            ["git", "-C", str(repo), "log", "--oneline", f"--since={days} days ago",
+             "--no-merges", "--format=%h %s (%ar)"],
+            timeout=15,
+        )
+        if output:
+            lines = output.split("\n")
+            if len(lines) > 30:
+                output = "\n".join(lines[:30]) + f"\n... ({len(lines) - 30} more)"
+            sections.append(f"### {repo.name}\n{output}")
+    return "\n\n".join(sections) if sections else "[No recent commits]"
+
+
 def load_brain_index() -> str:
     """Load Brain doc index (all docs across sections)."""
     if not BRAIN_SCRIPT.exists():
@@ -236,6 +269,9 @@ def load_system_state() -> str:
     decisions = load_recent_decisions()
     print(f"  Recent decisions: {len(decisions)} chars")
 
+    git_history = load_git_history()
+    print(f"  Git history: {len(git_history)} chars")
+
     return f"""## Current Konban Board (active tasks)
 {konban}
 
@@ -246,7 +282,10 @@ def load_system_state() -> str:
 {brain_index}
 
 ## Recent Decisions (KB)
-{decisions}"""
+{decisions}
+
+## Recent Git Commits (last 3 days)
+{git_history}"""
 
 
 # --- Reconciliation model call ---
