@@ -1,0 +1,95 @@
+{
+  "description": "Eval cases for reconciliation pipeline benchmark. Real transcripts with known structured work products.",
+  "created": "2026-02-21",
+  "cases": [
+    {
+      "id": "eval-001",
+      "session_id": "0377ea0f-5bfa-462a-a8dc-4334d5c332a4",
+      "project": "kaufmann-health",
+      "date": "2026-02-20",
+      "transcript_path": "~/.claude/projects/-Users-kkaufmann-github-kaufmann-health/0377ea0f-5bfa-462a-a8dc-4334d5c332a4.jsonl",
+      "artifact_type": "analysis",
+      "title": "What the Carlotta Interview Tells You About the SaaS Product",
+      "description": "Deep strategic analysis identifying sequencing gap in KH roadmap. Core tension between 'One click to be a therapist' vision vs infrastructure-first approach. Multi-paragraph with headers.",
+      "approximate_line": 1992,
+      "value": "very_high",
+      "persistence_status": "unknown",
+      "expected_actions": [
+        {"type": "create_brain_doc", "title": "Carlotta Interview Analysis — SaaS Strategy Implications"},
+        {"type": "log_konban_task", "rationale": "Enrich roadmap-related Konban tasks with interview insights"}
+      ]
+    },
+    {
+      "id": "eval-002",
+      "session_id": "aa5464a1-1301-4b88-9a0d-42210d373266",
+      "project": "Personal-Support",
+      "date": "2026-02-20",
+      "transcript_path": "~/.claude/projects/-Users-kkaufmann-Library-Mobile-Documents-com-apple-CloudDocs-Documents-Personal-Support/aa5464a1-1301-4b88-9a0d-42210d373266.jsonl",
+      "artifact_type": "plan",
+      "title": "Daily standup dashboard with weekly capacity matrix",
+      "description": "Structured schedule table showing meetings, available slots, weekly capacity breakdown. Partially persisted (Konban task logged) but full dashboard not saved.",
+      "approximate_line": 39,
+      "value": "medium",
+      "persistence_status": "partial",
+      "expected_actions": [
+        {"type": "no_action", "rationale": "Standups are ephemeral by design — daily dashboards don't need Brain persistence. Konban logging is sufficient."}
+      ]
+    },
+    {
+      "id": "eval-003",
+      "session_id": "d8c8b44d-3cd0-409c-b2d5-b1ef6327dd5d",
+      "project": "Personal-Support",
+      "date": "2026-02-19",
+      "transcript_path": "~/.claude/projects/-Users-kkaufmann-Library-Mobile-Documents-com-apple-CloudDocs-Documents-Personal-Support/d8c8b44d-3cd0-409c-b2d5-b1ef6327dd5d.jsonl",
+      "artifact_type": "plan",
+      "title": "Weekly capacity plan with available slots",
+      "description": "Multi-day capacity matrix showing ~11h productive capacity across two open days. No evidence of persistence.",
+      "approximate_line": 30,
+      "value": "low",
+      "persistence_status": "lost",
+      "expected_actions": [
+        {"type": "no_action", "rationale": "Weekly capacity snapshots are ephemeral — they're stale within days. Not worth persisting."}
+      ]
+    },
+    {
+      "id": "eval-004",
+      "session_id": "917eafa4-4326-4dc1-8e82-72283d5e0c2d",
+      "project": "Personal-Support",
+      "date": "2026-02-20",
+      "transcript_path": "~/.claude/projects/-Users-kkaufmann-Library-Mobile-Documents-com-apple-CloudDocs-Documents-Personal-Support/917eafa4-4326-4dc1-8e82-72283d5e0c2d.jsonl",
+      "artifact_type": "framework",
+      "title": "Email inbox access options",
+      "description": "Numbered list of options for reading emails from different inboxes. Operational, session-specific.",
+      "approximate_line": 4,
+      "value": "low",
+      "persistence_status": "ephemeral",
+      "expected_actions": [
+        {"type": "no_action", "rationale": "Session-specific operational guidance, correctly ephemeral."}
+      ]
+    },
+    {
+      "id": "eval-005",
+      "session_id": "current",
+      "project": "Personal-Support",
+      "date": "2026-02-21",
+      "transcript_path": "current_session",
+      "artifact_type": "plan",
+      "title": "Overnight Reconciliation Pipeline architecture",
+      "description": "Multi-stage pipeline design with permission model, model benchmark plan, and error pattern detection. Created during this session. ADR-004 written to repo.",
+      "approximate_line": null,
+      "value": "very_high",
+      "persistence_status": "persisted",
+      "expected_actions": [
+        {"type": "verify_persistence", "rationale": "ADR-004 written, Konban task created, Brain doc created. Pipeline should verify all three exist and cross-reference."}
+      ]
+    }
+  ],
+  "scoring_criteria": {
+    "artifact_detection": "Did the model correctly identify the structured work product?",
+    "value_assessment": "Did it correctly assess the value (very_high, medium, low)?",
+    "persistence_check": "Did it correctly determine whether the artifact was already persisted?",
+    "action_correctness": "Did it propose the right action (or correctly propose no_action)?",
+    "false_positive_rate": "How many spurious artifacts did it extract?",
+    "conflict_detection": "Did it flag any contradictions with existing system state?"
+  }
+}

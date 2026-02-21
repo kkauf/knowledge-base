@@ -1,0 +1,353 @@
+{
+  "benchmark_date": "2026-02-21T09:39:24.715525",
+  "models": {
+    "qwen": {
+      "cases": {
+        "eval-001": {
+          "extraction": {
+            "artifacts": [
+              {
+                "type": "analysis",
+                "title": "SaaS Product Strategic Analysis from Carlotta Interview",
+                "summary": "Comprehensive analysis revealing that profile depth is the load-bearing wall of the SaaS revenue model, identifying pre-booking OFFLINE_GAP (users google therapists before booking) as a critical funnel leak not addressed by current roadmap sequencing.",
+                "value": "very_high",
+                "persistence_status": "partial",
+                "persistence_evidence": "Roadmap updated in Notion Brain via task b76deb1; Active Context updated. However, the full strategic analysis document with confidence levels, sequencing problem framing, and Audi/Mazda principle was delivered in conversation but not explicitly saved as a standalone strategic doc.",
+                "content_excerpt": "The SaaS strategy doc says 'One click to be a therapist' \u2014 replace the entire tool stack. But the Carlotta interview says the surface is the pipe. The surface IS the conversion mechanism. She saw 3 therapists, none matched her method, the profiles were too thin to form a 'Gef\u00fchl', and her instinct was to leave and google them. That's the OFFLINE_GAP starting at the directory, not at the booking. Profile depth isn't a polish item \u2014 it's the load-bearing wall of the SaaS revenue model.",
+                "entities_referenced": [
+                  "Carlotta interview",
+                  "SaaS strategy",
+                  "OFFLINE_GAP",
+                  "Roadmap",
+                  "Profile expansion",
+                  "Stripe Connect"
+                ]
+              },
+              {
+                "type": "framework",
+                "title": "Testing Strategy Framework - Integration vs Mocks",
+                "summary": "Framework explaining why mocks failed to catch EARTH-294 bugs, with test layer mapping table and the principle that integration code must be tested against real external systems.",
+                "value": "medium",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Integration testing rules added to CLAUDE.md (committed to main); meta-learning recorded in MEMORY.md; testing guide created at docs/private/cal-multiformat-testing-guide.md",
+                "content_excerpt": "The gap is structural, not a coverage oversight. The existing tests are unit/API tests that mock Supabase. The 4 bugs lived in upgradeSchedule.ts which talks directly to Cal.com's Railway PostgreSQL via raw SQL. They were integration bugs. None of these are testable with mocks. A mock would encode your assumptions \u2014 the same assumptions that were wrong. For integration code that talks to external systems, test against the real system.",
+                "entities_referenced": [
+                  "EARTH-294",
+                  "CLAUDE.md",
+                  "MEMORY.md",
+                  "test-cal-multiformat.ts",
+                  "Cal.com"
+                ]
+              },
+              {
+                "type": "roadmap",
+                "title": "Updated Product Roadmap with Profile Depth Priority",
+                "summary": "Revised roadmap sequence moving Profile Depth + Honest Match Framing to #1 active milestone, adding Consultative Matching + Premium Flow track, and gating SaaS pricing on conversion proof.",
+                "value": "very_high",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Roadmap updated in Notion Brain via task b76deb1 (completed, exit code 0); Active Context v7.0 updated to reflect new priority sequence and mindset reminders",
+                "content_excerpt": "Roadmap (Brain) \u2014 new sequence: 1. Calendar Multi-Format \u2014 Completed (shipped Feb 20). 2. Profile Depth + Honest Match Framing \u2014 moved up from #6, expanded scope. Three workstreams: dev (char limits + Werdegang field), ops (Katherine pilots rich profiles), copy (honest 'no NARM in Berlin' framing). 6. Consultative Matching + Premium Flow \u2014 two-track: productize self-service + monetize Katherine's concierge.",
+                "entities_referenced": [
+                  "Notion Brain",
+                  "Active Context",
+                  "Profile Depth",
+                  "Consultative Matching",
+                  "Premium Flow",
+                  "SaaS pricing"
+                ]
+              }
+            ],
+            "error_patterns": [],
+            "session_summary": "Session completed EARTH-294 bugfixes with 4 Cal.com integration bugs fixed and shipped, established integration testing principles to prevent similar issues, and produced strategic analysis from Carlotta interview that reprioritized the roadmap to address pre-booking OFFLINE_GAP through profile depth improvements.",
+            "_meta": {
+              "model": "qwen/qwen3.5-397b-a17b",
+              "latency_s": 38.13,
+              "prompt_tokens": 6082,
+              "completion_tokens": 1902,
+              "total_tokens": 7984
+            }
+          },
+          "scores": {
+            "artifacts_found": 3,
+            "top_value": "very_high",
+            "expected_value": "very_high",
+            "value_match": true,
+            "persistence_detected": "partial",
+            "expected_persistence": "unknown",
+            "correctly_ephemeral": null,
+            "total": 2
+          }
+        },
+        "eval-002": {
+          "extraction": {
+            "artifacts": [
+              {
+                "type": "framework",
+                "title": "Tax Expense Question Assessment",
+                "summary": "Structured assessment of 15 tax expense questions with Yes/No answers and reasoning for each, documenting decisions on deductions like tax prep fees, IRA contributions, and investment expenses.",
+                "value": "medium",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Backup file saved to ~/Documents/Personal Bureaucracy/Taxes/2025/greenback-fbar-2025.md and Konban task updated with file link and status set to Pending Externally",
+                "content_excerpt": "Tax expense questions mapped with answers: Q0 Debt forgiven=No, Q1 Investment expenses=No, Q2 Roth IRA=No, Q3 Traditional IRA=No, Q4 IRA rollover=No, Q5 Pension plan=No, Q6 Student loan interest=No, Q7 Medical expenses=No, Q8 Alimony=No, Q9 Charitable contributions=No, Q10 Job-related expenses=No, Q11 Tax prep/accounting fees=Yes (Greenback for 2024 taxes), Q12+ Pay someone to work in home=No",
+                "entities_referenced": [
+                  "Greenback",
+                  "2024 taxes",
+                  "tax preparation"
+                ]
+              },
+              {
+                "type": "analysis",
+                "title": "Berlin Rental Property Information",
+                "summary": "Extracted structured data from rental contract including property details, landlord information, tenants, rental start date, and purchase information for tax filing purposes.",
+                "value": "medium",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Included in greenback-fbar-2025.md backup file in Taxes/2025 folder",
+                "content_excerpt": "Property: Wiesenstr. 7, 13357 Berlin (Whg.-Nr. 20053-2002901-02, 4.OG re). Vermieter: Katherine Elisabeth Evans Kaufmann und Konstantin Gregor Michael Kaufmann. Tenants: Ekaterina Strutsenko, Kristina Ochkina, Olga Bystrova. Rental start: 01.11.2023. Size: 114 m\u00b2, furnished. Purchase price: 295,000 EUR. Purchase date: 01/01/2012 (placeholder). Actively managed: No (Hausverwaltung SECON).",
+                "entities_referenced": [
+                  "Berlin rental",
+                  "Wiesenstr. 7",
+                  "Hausverwaltung SECON",
+                  "Katherine Elisabeth Evans Kaufmann",
+                  "Konstantin Gregor Michael Kaufmann"
+                ]
+              }
+            ],
+            "error_patterns": [],
+            "session_summary": "Completed Greenback tax questionnaire to 100% with rental property and expense information filled, backup file saved and Konban task updated, stopped before final submission for user review.",
+            "_meta": {
+              "model": "qwen/qwen3.5-397b-a17b",
+              "latency_s": 34.98,
+              "prompt_tokens": 3354,
+              "completion_tokens": 2505,
+              "total_tokens": 5859
+            }
+          },
+          "scores": {
+            "artifacts_found": 2,
+            "top_value": "medium",
+            "expected_value": "medium",
+            "value_match": true,
+            "persistence_detected": "persisted",
+            "expected_persistence": "partial",
+            "correctly_ephemeral": false,
+            "total": 2
+          }
+        },
+        "eval-003": {
+          "extraction": {
+            "artifacts": [
+              {
+                "type": "analysis",
+                "title": "EUIPO Trademark Conflict Analysis - KAUFMANN HEALTH",
+                "summary": "Comprehensive eSearch conflict assessment showing zero exact matches for 'KAUFMANN HEALTH' and analysis of 7 partial 'KAUFMANN' marks in Classes 35/42/44, concluding no blocking conflicts exist.",
+                "value": "very_high",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Konban task 22ab2e4a-2d15-8007-9c55-d2d191df33fb updated with decision and next steps; user confirmed 'Update Konban' and assistant logged the analysis",
+                "content_excerpt": "Exact Match: 'KAUFMANN HEALTH' - 0 results. Completely clear. Partial Match: 'KAUFMANN' - 33 results, only ~7 active/registered with class overlap. SUSANNE KAUFMANN (Class 44, cosmetics) is the only mark worth watching but opposition risk is very low (~5%). All others in Classes 42/35 are unrelated industries (construction, architecture, law, fashion).",
+                "entities_referenced": [
+                  "Kaufmann Health",
+                  "Kaufmann Earth LLC",
+                  "EUIPO",
+                  "KAUFMANN HEALTH"
+                ]
+              },
+              {
+                "type": "decision",
+                "title": "Trademark Class Recommendation - Classes 35+42+44",
+                "summary": "Strategic decision to file EU trademark in all three classes (35, 42, 44) at EUR 1,050 total, with reasoning that Class 35 marketplace protection is essential for KH's business model and costs 6x more to add later.",
+                "value": "very_high",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Logged to Konban Markenschutz task; user confirmed 'I'll bite the bullet on 1050 EUR' and requested Konban update",
+                "content_excerpt": "Recommendation: File all 3 classes. EUR 1,050. Class 35 isn't optional - KH IS a marketplace (therapists list \u2192 patients find them \u2192 KH takes a cut). Adding Class 35 later = new application = EUR 900 minimum. Adding it now = EUR 150 extra. You'd be paying 6x more for the same protection by waiting.",
+                "entities_referenced": [
+                  "Kaufmann Health",
+                  "Kaufmann Earth",
+                  "EUIPO",
+                  "Nice Classification"
+                ]
+              },
+              {
+                "type": "framework",
+                "title": "EUIPO Filing Cheat Sheet",
+                "summary": "Step-by-step filing reference with mark specifications, class descriptions, payment info, and form tips for completing the EUIPO trademark application in ~20 minutes.",
+                "value": "medium",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Assistant stated 'Konban updated' after presenting the cheat sheet; structured reference logged to task",
+                "content_excerpt": "Mark type: Word mark. Mark text: KAUFMANN HEALTH. Applicant: Kaufmann Earth LLC. Classes: 35 (Online marketplace services), 42 (SaaS/software), 44 (Healthcare services). Payment: EUR 1,050 due within 1 month. Language: English primary, German secondary.",
+                "entities_referenced": [
+                  "EUIPO",
+                  "Kaufmann Earth LLC",
+                  "KAUFMANN HEALTH"
+                ]
+              },
+              {
+                "type": "plan",
+                "title": "QA Candidate Outreach & Triage Summary",
+                "summary": "Completion log for 4 Upwork QA candidates: Sameh/Zuhaib pending, Valentin dropped (low-effort response), Rav Rommel advanced to call stage with cal.com link sent.",
+                "value": "medium",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Konban task 30cb2e4a-2d15-8135-beca-d71afff3ca5b updated to 'Pending Externally \u21ba' with full outreach log; assistant confirmed 'Konban updated'",
+                "content_excerpt": "All 4 candidates messaged. Valentin: 'ok, we can discuss cooperation' - dropped. Rav Rommel: answered all 3 questions, has Playwright, sent cal.com/kkauf/30min booking link. Sameh/Zuhaib: awaiting response. Timezone advantage: Philippines GMT+8 = async QA while user sleeps.",
+                "entities_referenced": [
+                  "Valentin G.",
+                  "Rav Rommel B.",
+                  "Sameh M.",
+                  "Zuhaib A.",
+                  "Upwork",
+                  "Kaufmann Health"
+                ]
+              }
+            ],
+            "error_patterns": [
+              {
+                "tool": "mcp__claude-in-chrome",
+                "command": "navigate/browser actions",
+                "error_summary": "Browser extension disconnected when navigating from Upwork to EUIPO",
+                "resolution": "Called tabs_context_mcp with createIfEmpty:true to get new tab, then navigated",
+                "suggested_fix": "Document that browser sessions may need reconnection between domain switches; consider auto-reconnect logic"
+              },
+              {
+                "tool": "mcp__claude-in-chrome",
+                "command": "click on message input area",
+                "error_summary": "Click on coordinate 710,685 didn't focus the correct textbox for Upwork messages",
+                "resolution": "Used read_page to find correct textbox ref (ref_33) and clicked that directly",
+                "suggested_fix": "Prefer ref-based targeting over coordinates for form inputs; document Upwork's dynamic input structure"
+              },
+              {
+                "tool": "mcp__claude-in-chrome",
+                "command": "javascript_tool for eSearch extraction",
+                "error_summary": "CSS selector queries (.result, td) returned empty - page structure didn't match expected classes",
+                "resolution": "Switched to regex extraction on document.body.innerText to parse trademark names, classes, and statuses",
+                "suggested_fix": "Document eSearch page structure quirks; create reusable extraction snippet for EUIPO results"
+              },
+              {
+                "tool": "konban/notion-api.py",
+                "command": "blocking/blocked-by relations",
+                "error_summary": "CLI helper doesn't support task dependency relations",
+                "resolution": "Logged dependency as cross-referenced notes on both tasks instead",
+                "suggested_fix": "Add --blocks and --blocked-by flags to notion-api.py update command, or document workaround"
+              },
+              {
+                "tool": "mcp__claude-in-chrome",
+                "command": "get_page_text on EUIPO",
+                "error_summary": "Page exceeded 50000 character limit",
+                "resolution": "Switched to targeted JavaScript extraction instead of full page text",
+                "suggested_fix": "Default to targeted JS extraction for large pages; document character limits"
+              }
+            ],
+            "session_summary": "Completed QA candidate outreach on Upwork (4 candidates messaged, Rav Rommel advanced to call stage, Valentin dropped). Conducted EUIPO eSearch conflict analysis for KAUFMANN HEALTH trademark - no blocking conflicts found. Recommended filing Classes 35+42+44 at EUR 1,050. Created blocking Konban task for Wise Business setup before payment. All updates logged to Konban.",
+            "_meta": {
+              "model": "qwen/qwen3.5-397b-a17b",
+              "latency_s": 25.51,
+              "prompt_tokens": 8513,
+              "completion_tokens": 2199,
+              "total_tokens": 10712
+            }
+          },
+          "scores": {
+            "artifacts_found": 4,
+            "top_value": "very_high",
+            "expected_value": "low",
+            "value_match": false,
+            "persistence_detected": "persisted",
+            "expected_persistence": "lost",
+            "correctly_ephemeral": false,
+            "total": 0
+          }
+        },
+        "eval-004": {
+          "extraction": {
+            "artifacts": [
+              {
+                "type": "analysis",
+                "title": "QA Candidate Comparison Matrix",
+                "summary": "Structured comparison of 4 QA engineer candidates across German fluency, automation skills, engagement level, and risk factors for Kaufmann Health hiring decision",
+                "value": "medium",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Assistant confirmed 'Logged' to Konban QA task; Sameh identified as frontrunner and contact initiated",
+                "content_excerpt": "Candidate comparison: Sameh M. (German B2/C1, Playwright/Selenium, answered all questions professionally), Rav Rommel B. (no German, uses Google Translate, moved to low/no-code), Zuhaib A. (manual only, low-effort response), Valentin G. (terse engagement, already dropped). Sameh is clearly the frontrunner with German + Playwright + React/Next.js stack match.",
+                "entities_referenced": [
+                  "Sameh Mohamed",
+                  "Rav Rommel Banaag",
+                  "Zuhaib Ahmed",
+                  "Valentin Gospodarchyk",
+                  "Kaufmann Health"
+                ]
+              },
+              {
+                "type": "decision",
+                "title": "KAUFMANN HEALTH Trademark Filing Decision Record",
+                "summary": "Decision to file EUTM for KAUFMANN HEALTH (EUR 1,050), skip KAUFMANN EARTH trademark, and engage Pintz & Partners for EEA representative (EUR 170)",
+                "value": "very_high",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Konban task updated with application #019320103, filing date Feb 20 2026, payment confirmed, status moved to 'Pending Externally'; email sent to Pintz & Partners",
+                "content_excerpt": "KAUFMANN HEALTH trademark filed: Application #019320103, Fast Track, EUR 1,050, Classes 35+42+44, filing date Feb 20 2026. Decision to skip KAUFMANN EARTH (separate EUR 1,050 filing, surname descriptiveness risk, back-office entity). Pintz & Partners (trademark.eu) engaged for EEA representation takeover at EUR 170. Total cost: ~EUR 1,220.",
+                "entities_referenced": [
+                  "KAUFMANN HEALTH",
+                  "Kaufmann Earth LLC",
+                  "Pintz & Partners",
+                  "EUIPO",
+                  "trademark.eu"
+                ]
+              },
+              {
+                "type": "framework",
+                "title": "EEA Trademark Representative Service Comparison",
+                "summary": "Research comparison of EEA trademark representative services for non-EEA applicants requiring EUIPO representation",
+                "value": "medium",
+                "persistence_status": "persisted",
+                "persistence_evidence": "Decision executed - Pintz & Partners contacted via email; research informed the EUR 170 selection",
+                "content_excerpt": "Service comparison: trademark.eu (EUR 170, cheapest, straightforward takeover), european-trademark.com (EUR 250, includes 1h consultation + status report). Recommendation: trademark.eu at EUR 170 for simple representation takeover. Process: file application, complete payment, contact service, sign Power of Attorney, they file PoA with EUIPO.",
+                "entities_referenced": [
+                  "trademark.eu",
+                  "european-trademark.com",
+                  "EUIPO",
+                  "Pintz & Partners"
+                ]
+              }
+            ],
+            "error_patterns": [
+              {
+                "tool": "mcp__claude-in-chrome__*",
+                "command": "browser automation / tab connection",
+                "error_summary": "Chrome extension repeatedly failed to connect to Claude Code session despite browser being open and MCP tab visible",
+                "resolution": "User manually completed EUIPO payment flow; assistant drafted email for trademark representative contact instead",
+                "suggested_fix": "Document Chrome extension connection troubleshooting steps (toggle extension, refresh MCP tab, restart Chrome); consider fallback workflow for time-sensitive payment flows"
+              },
+              {
+                "tool": "EUIPO filing system",
+                "command": "trademark application submission",
+                "error_summary": "Non-EEA applicant (US LLC) requires EEA legal representative - blocking warning presented at payment stage",
+                "resolution": "Proceeded with payment to secure filing date; will appoint EEA representative (Pintz & Partners) within 2-month deficiency window",
+                "suggested_fix": "Add EEA representative requirement check to pre-filing checklist for non-EEA applicants; research representative options before reaching payment stage"
+              }
+            ],
+            "session_summary": "Session continued from previous conversation to complete QA candidate triage (Sameh selected, call scheduled) and execute KAUFMANN HEALTH trademark filing (EUR 1,050 paid, EEA representative engaged for EUR 170); Chrome extension connectivity issues required manual payment completion.",
+            "_meta": {
+              "model": "qwen/qwen3.5-397b-a17b",
+              "latency_s": 21.63,
+              "prompt_tokens": 8443,
+              "completion_tokens": 1625,
+              "total_tokens": 10068
+            }
+          },
+          "scores": {
+            "artifacts_found": 3,
+            "top_value": "very_high",
+            "expected_value": "low",
+            "value_match": false,
+            "persistence_detected": "persisted",
+            "expected_persistence": "ephemeral",
+            "correctly_ephemeral": false,
+            "total": 0
+          }
+        }
+      },
+      "totals": {
+        "score": 4,
+        "cost_estimate": 0,
+        "latency_total": 120.25
+      }
+    }
+  }
+}

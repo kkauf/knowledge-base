@@ -275,6 +275,73 @@ def cmd_assert(args):
     db.close()
 
 
+def cmd_correct(args):
+    """Correct a fact (alias for assert with manual-correction source)."""
+    args.source = 'manual-correction'
+    args.type = None
+    cmd_assert(args)
+
+
+def cmd_delete_fact(args):
+    """Delete a fact (expire it with no replacement)."""
+    db = get_db()
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+    entity = db.execute(
+        "SELECT * FROM entities WHERE lower(name) = lower(?)",
+        (args.entity,)
+    ).fetchone()
+
+    if not entity:
+        print(f"  Entity not found: {args.entity}")
+        db.close()
+        return
+
+    existing = db.execute(
+        "SELECT * FROM facts WHERE entity_id = ? AND attribute = ? AND valid_to IS NULL",
+        (entity['id'], args.attribute)
+    ).fetchone()
+
+    if not existing:
+        print(f"  No active fact: [{args.entity}] {args.attribute}")
+        db.close()
+        return
+
+    db.execute(
+        "UPDATE facts SET valid_to = ? WHERE id = ?",
+        (now, existing['id'])
+    )
+    db.commit()
+    print(f"  Deleted: [{args.entity}] {args.attribute} = {existing['value']}")
+    db.close()
+
+
+def cmd_recent(args):
+    """Show recently extracted facts for review."""
+    db = get_db()
+    cutoff = (datetime.now(timezone.utc) - __import__('datetime').timedelta(days=args.days)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    facts = db.execute("""
+        SELECT e.name, e.type, f.attribute, f.value, f.source, f.created_at
+        FROM facts f JOIN entities e ON f.entity_id = e.id
+        WHERE f.created_at > ? AND f.valid_to IS NULL
+        ORDER BY f.created_at DESC
+        LIMIT ?
+    """, (cutoff, args.limit)).fetchall()
+
+    if not facts:
+        print(f"  No new facts in the last {args.days} days.")
+        db.close()
+        return
+
+    print(f"  Recent facts ({len(facts)} in last {args.days}d):\n")
+    for f in facts:
+        src = f['source'].split('/')[-1][:30] if f['source'] else '?'
+        print(f"  [{f['name']}] {f['attribute']} = {f['value'][:80]}")
+        print(f"    source: {src} | {f['created_at'][:16]}")
+    db.close()
+
+
 def cmd_decide(args):
     """Log a decision."""
     import uuid
@@ -469,6 +536,22 @@ def main():
     p_assert.add_argument('--type', help='Entity type (if creating new)', default=None)
     p_assert.add_argument('--source', help='Source of this fact', default=None)
 
+    # correct (alias for assert with manual-correction source)
+    p_correct = subparsers.add_parser('correct', help='Correct a fact (supersedes existing value)')
+    p_correct.add_argument('entity', help='Entity name')
+    p_correct.add_argument('attribute', help='Attribute name')
+    p_correct.add_argument('value', help='Corrected value')
+
+    # delete-fact
+    p_delfact = subparsers.add_parser('delete-fact', help='Delete a fact (marks it expired, no replacement)')
+    p_delfact.add_argument('entity', help='Entity name')
+    p_delfact.add_argument('attribute', help='Attribute name to delete')
+
+    # recent (for fact audit)
+    p_recent = subparsers.add_parser('recent', help='Show recently extracted facts for review')
+    p_recent.add_argument('--days', type=int, default=7, help='How many days back (default: 7)')
+    p_recent.add_argument('--limit', type=int, default=30, help='Max facts to show (default: 30)')
+
     # decide
     p_decide = subparsers.add_parser('decide', help='Log a decision')
     p_decide.add_argument('title', help='Decision title')
@@ -491,6 +574,9 @@ def main():
         'decisions': cmd_decisions,
         'entities': cmd_entities,
         'assert': cmd_assert,
+        'correct': cmd_correct,
+        'delete-fact': cmd_delete_fact,
+        'recent': cmd_recent,
         'decide': cmd_decide,
         'status': cmd_status,
         'domain': cmd_domain,
