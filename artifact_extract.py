@@ -161,6 +161,7 @@ def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL) -> dict:
             {"role": "user", "content": user_content}
         ],
         "temperature": 0.1,  # Low temp for precision
+        "provider": {"data_collection": "deny"},
     }).encode("utf-8")
 
     req = urllib.request.Request(

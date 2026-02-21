@@ -178,6 +178,7 @@ def call_model(prompt: str, user_content: str, model: str) -> dict:
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.2,
+        "provider": {"data_collection": "deny"},
     }).encode("utf-8")
 
     req = urllib.request.Request(

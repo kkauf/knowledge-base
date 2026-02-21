@@ -199,6 +199,7 @@ def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL, domain_co
             {"role": "user", "content": "\n".join(user_parts)}
         ],
         "temperature": 0.3,
+        "provider": {"data_collection": "deny"},
     }).encode("utf-8")
 
     req = urllib.request.Request(

@@ -269,6 +269,7 @@ def call_reconciliation_model(artifacts_json: str, system_state: str, model: str
             {"role": "user", "content": user_content}
         ],
         "temperature": 0.1,
+        "provider": {"data_collection": "deny"},
     }).encode("utf-8")
 
     req = urllib.request.Request(
