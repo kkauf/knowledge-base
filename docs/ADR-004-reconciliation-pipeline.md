@@ -379,13 +379,40 @@ The Brain has a hierarchical structure with typed sections. The daemon routes do
 
 **Phase 2 closing test (Feb 22):** Drained 6 daemon-produced pending artifacts. 2 Brain docs auto-created (EARTH-294 root cause analysis, profile enrichment concept), 4 correctly filtered (ephemeral/minor). State consistency check flagged profile depth workstream (a) as shipped. Zero failures. Pipeline handles real daemon output end-to-end.
 
-### Phase 3: Standup integration (in progress)
+### Phase 3: Standup integration & skill self-improvement (in progress)
 
 22. ~~**Interactive approval at standup**~~ Done: `pipeline.py --show-proposals`, `--approve <indices|all>`, `--dismiss-proposals`. Human approval overrides confidence to "high" and executes via the standard executor. Standup protocol updated with step 3a: present YOUR CALL proposals, handle natural-language approval ("approve all", "1 and 3 yes, skip 2"), execute approved actions, report results. Stale state conflicts are informational for next Kraken session.
 23. **Rollback capability** — `pipeline.py --rollback <action-id>` undoes a specific auto-executed action using audit log's "previous value" field.
 24. **Feedback loop** — Log rejections of Tier 2 proposals. Over time, tune confidence thresholds based on rejection rate.
 25. ~~**Dynamic Context Frame**~~ Done: `context_frame.py` generates a context frame from live system state (Konban board, Active Context, Brain index, KB activity) that's injected into extraction prompts. Cached at `~/.claude/knowledge/context-frame.md` with 6h TTL. Daemon refreshes it at the start of each run. This gives the extraction LLM awareness of active commitments so it can recognize scheduling decisions, progress signals, and friction signals as extractable — not ephemeral. New artifact type: `commitment_update` (reschedule/progress/friction/completion). New executor action: `update_konban_task` (update title, due date). Motivated by MBA scheduling conversations being invisible to the pipeline because extraction had no concept of "what matters."
 26. ~~**Fix first-time session processing**~~ Done: Changed `parse_session_incremental` to process ALL messages on first encounter instead of only the last 50. The old "last 50" behavior silently dropped early-session content — in long standup sessions (800+ messages), the first 750 messages were permanently lost. The extraction LLM's existing 50K char truncation handles overly long transcripts gracefully.
+27. ~~**Automated skill improvement pipeline**~~ Done: Closes the loop from skill helper errors to SKILL.md documentation fixes. Five changes across the codebase:
+
+    **Problem**: When Claude calls skill helpers (linear-api.py, notion-api.py, etc.) with wrong arguments, the error gets retried in-session but never generates lasting SKILL.md improvements. The extraction pipeline couldn't see tool calls (`_parse_all_messages()` only keeps text blocks), the reconciler had no SKILL.md context, and the executor stored vague proposals with no structured patch.
+
+    **Solution**:
+
+    - **`extract.py`**: Added `_parse_tool_error_sequences(session_path, offset)` — reads raw JSONL `tool_use`/`tool_result` blocks, identifies Bash calls to `~/.claude/skills/*/` helpers via regex, classifies each call as `error`, `soft_miss`, `discovery`, or clean, groups into error→retry→success sequences. Error type classification: `wrong_arg_type`, `invalid_value`, `case_sensitivity`, `missing_flag`, `inefficient_lookup`, `discovery_call`. Runs parallel to `_parse_all_messages()` (fact extraction unchanged).
+
+    - **`artifact_extract.py`**: Calls `_parse_tool_error_sequences()`, injects results as `<tool_errors>` XML section in the GLM-5 prompt. Enhanced `error_pattern` schema: `skill`, `script`, `error_type`, `correct_usage`, `doc_gap` (true if likely missing from SKILL.md).
+
+    - **`pipeline_reconcile.py`**: Added `load_skill_doc(skill_name)` and `load_relevant_skill_docs(artifacts)`. When error_pattern artifacts are pending, loads referenced SKILL.md files (truncated to ~4K chars) into system state. Reconciler compares errors against SKILL.md: already documented → `no_action`; genuinely missing → `fix_skill` with structured patch (`patch_type`, `section_heading`, `anchor_text`, `new_content`).
+
+    - **`executor.py`**: Replaced `execute_fix_skill()` with structured patch application. `_apply_skill_patch()` handles 4 patch types: `append_to_section`, `add_note_after`, `add_new_section`, `report_bug`. High-confidence additive patches auto-apply; failures fall through to proposals. `_save_skill_proposal()` with content-based dedup. Enhanced `generate_review()` shows auto-applied fixes + richer proposal details.
+
+    - **`pipeline.py`**: Added `--show-skill-fixes`, `--apply-skill-fix <indices|all>`, `--dismiss-skill-fixes` CLI commands. Same approval pattern as standup proposals.
+
+    **Confidence model for skill fixes**:
+
+    | Scenario | Confidence | Action |
+    |----------|-----------|--------|
+    | Info already in SKILL.md, Claude ignored it | high | `no_action` (optionally add emphasis) |
+    | Adding correct usage example to existing section | high | Auto-apply |
+    | Missing constraint/enum/case note | medium | Propose at standup |
+    | Helper script bug (not docs) | medium | Propose as `report_bug` |
+    | Ambiguous/transient error | low | Log only |
+
+    **Validation**: Scanned 78 real sessions, found 64 suboptimal skill helper calls across 4 skills (linear, konban, notion-docs, gcal). Applied initial SKILL.md patches for the most common patterns: wrong arg types, unsupported flags, discovery-avoidable lookups.
 
 ## Research Patterns (from CogCanvas, memU, Mem0)
 
