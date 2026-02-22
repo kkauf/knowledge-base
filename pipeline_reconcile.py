@@ -48,6 +48,7 @@ PENDING_FILE = KB_DIR / "artifacts-pending.json"
 KONBAN_SCRIPT = Path.home() / ".claude" / "skills" / "konban" / "notion-api.py"
 BRAIN_SCRIPT = Path.home() / ".claude" / "skills" / "notion-docs" / "notion-api.py"
 KB_SCRIPT = KB_DIR / "kb.py"
+SKILLS_DIR = Path.home() / ".claude" / "skills"
 
 # --- Reconciliation Prompt ---
 
@@ -68,7 +69,10 @@ RULES:
   * For Konban tasks: use log_konban_task to add context to an existing task
   * For Brain docs: use enrich_brain_doc to append a new section to a related existing doc
   * Only create_brain_doc when no existing doc is a natural home for the content
-- For error_patterns: propose SKILL.md fixes (propose only, never auto-apply)
+- For error_patterns: compare against the SKILL.md document (included in system state when available).
+  * If the constraint IS already documented in SKILL.md and Claude ignored it → no_action (optionally note "already documented")
+  * If the constraint is genuinely MISSING from SKILL.md → propose fix_skill with a STRUCTURED PATCH
+  * If the error is a helper script bug (not a docs issue) → propose fix_skill with patch_type "report_bug"
 - Be conservative — when in doubt, propose no_action rather than creating noise
 
 ENRICHMENT vs CREATION decision:
@@ -140,6 +144,23 @@ When you receive a "commitment_update" artifact, map it to one or more actions o
 - "completion" → done_konban_task (if evidence is explicit) or log_konban_task (if signal is implicit)
 The "commitment_target" field in the artifact tells you which Konban task to target (fuzzy match against task titles in system state).
 
+SKILL.md FIX STRUCTURED PATCHES:
+When proposing fix_skill, include a structured patch in the action:
+- "skill": skill directory name (e.g., "linear", "konban")
+- "patch_type": "append_to_section" | "add_note_after" | "add_new_section" | "report_bug"
+  * append_to_section: add content at the end of an existing section (identified by heading)
+  * add_note_after: add a note/warning after a specific anchor text
+  * add_new_section: add a new ## section to SKILL.md
+  * report_bug: the helper script itself has a bug (not a docs issue)
+- "section_heading": the ## heading to target (for append_to_section, add_note_after)
+- "anchor_text": specific text to locate within the section (for add_note_after). The new content is inserted on a new line after the line containing this text.
+- "new_content": the exact markdown to insert. Keep it concise (1-3 lines). Match existing SKILL.md style.
+- "confidence": "high" for clear doc gaps with known correct usage, "medium" for likely gaps
+
+Examples:
+- Error: used --priority "High" but linear-api.py expects integer → patch_type: "append_to_section", section_heading: "Commands", new_content: "**Priority values are integers**: 0=No priority, 1=Urgent, 2=High, 3=Medium, 4=Low. Do NOT use string names."
+- Error: used --label "feature" but labels are case-sensitive → patch_type: "add_note_after", section_heading: "Labels", anchor_text: "--label", new_content: "> **Labels are case-sensitive.** Use exact casing: `Feature`, `Bug`, `Improvement`."
+
 PERMISSION MODEL (strict):
 - CAN: create_konban_task (tagged [daemon]), log_konban_task, done_konban_task (HIGH confidence only), create_brain_doc, enrich_brain_doc, update_konban_task (title/due date only), fix_skill, no_action
 - CANNOT: delete anything, modify Active Context, send external comms
@@ -173,7 +194,12 @@ Return ONLY valid JSON:
       "artifact_group": "shared ID linking actions from the same artifact (e.g. 'carlotta-interview')",
       "brain_doc": "title of the Brain doc this task relates to (for create_konban_task from decomposition)",
       "confidence": "high | medium | low (REQUIRED — see confidence scoring rules)",
-      "rationale": "why this action (include staleness assessment and confidence justification)"
+      "rationale": "why this action (include staleness assessment and confidence justification)",
+      "skill": "skill directory name (for fix_skill only)",
+      "patch_type": "append_to_section | add_note_after | add_new_section | report_bug (for fix_skill only)",
+      "section_heading": "## heading to target in SKILL.md (for fix_skill only)",
+      "anchor_text": "text to locate for add_note_after (for fix_skill only, null otherwise)",
+      "new_content": "exact markdown to insert (for fix_skill only)"
     }
   ],
   "conflicts_flagged": [
@@ -261,8 +287,56 @@ def load_brain_index() -> str:
     return output or "[Brain index unavailable]"
 
 
-def load_system_state() -> str:
-    """Load all system state for reconciliation context."""
+def load_skill_doc(skill_name: str, max_chars: int = 4000) -> str:
+    """Load a SKILL.md file for a given skill, truncated to max_chars."""
+    skill_path = SKILLS_DIR / skill_name / "SKILL.md"
+    if not skill_path.exists():
+        return ""
+    try:
+        content = skill_path.read_text()
+        if len(content) > max_chars:
+            content = content[:max_chars] + f"\n\n[... truncated at {max_chars} chars]"
+        return content
+    except OSError:
+        return ""
+
+
+def load_relevant_skill_docs(artifacts: list) -> str:
+    """Load SKILL.md files referenced by error_pattern artifacts.
+
+    Returns a formatted string with all relevant skill docs for injection
+    into the reconciliation prompt.
+    """
+    skill_names = set()
+    for a in artifacts:
+        if a.get("type") == "error_pattern":
+            # Extract skill name from various possible fields
+            skill = a.get("skill") or a.get("tool") or ""
+            if skill:
+                skill_names.add(skill)
+
+    if not skill_names:
+        return ""
+
+    sections = []
+    for skill in sorted(skill_names):
+        doc = load_skill_doc(skill)
+        if doc:
+            sections.append(f"### SKILL.md: {skill}\n\n{doc}")
+
+    if not sections:
+        return ""
+
+    return "## Relevant SKILL.md Documents\n\n" + "\n\n---\n\n".join(sections)
+
+
+def load_system_state(artifacts: list = None) -> str:
+    """Load all system state for reconciliation context.
+
+    Args:
+        artifacts: Optional list of pending artifacts. When provided,
+            loads SKILL.md docs referenced by error_pattern artifacts.
+    """
     print("Loading system state...")
 
     konban = load_konban_state()
@@ -280,7 +354,14 @@ def load_system_state() -> str:
     git_history = load_git_history()
     print(f"  Git history: {len(git_history)} chars")
 
-    return f"""## Current Konban Board (active tasks)
+    # Load SKILL.md docs when error_pattern artifacts are pending
+    skill_docs = ""
+    if artifacts:
+        skill_docs = load_relevant_skill_docs(artifacts)
+        if skill_docs:
+            print(f"  Skill docs: {len(skill_docs)} chars")
+
+    state = f"""## Current Konban Board (active tasks)
 {konban}
 
 ## Active Context (KH Brain)
@@ -294,6 +375,11 @@ def load_system_state() -> str:
 
 ## Recent Git Commits (last 3 days)
 {git_history}"""
+
+    if skill_docs:
+        state += f"\n\n{skill_docs}"
+
+    return state
 
 
 STATE_CONSISTENCY_PROMPT = """You are a state-consistency checker for a personal knowledge management system.
@@ -497,8 +583,22 @@ def main():
 
     args = parser.parse_args()
 
-    # Always load system state (needed for both consistency check and reconciliation)
-    system_state = load_system_state()
+    # Load artifacts first (needed to decide whether to load SKILL.md docs)
+    artifacts_path = args.artifacts or str(PENDING_FILE)
+    has_artifacts = False
+    actionable = []
+
+    if os.path.exists(artifacts_path):
+        with open(artifacts_path) as f:
+            artifacts = json.load(f)
+        actionable = [a for a in artifacts
+                      if (a.get("persistence_status") != "persisted"
+                          and a.get("value", "low") in ("very_high", "medium"))
+                      or a.get("type") == "error_pattern"]
+        has_artifacts = len(actionable) > 0
+
+    # Load system state (includes SKILL.md docs when error_patterns are pending)
+    system_state = load_system_state(artifacts=actionable if has_artifacts else None)
     print()
 
     # State consistency check — runs always, even with no artifacts
@@ -522,20 +622,6 @@ def main():
                 json.dump(consistency, f, indent=2, default=str)
             print(f"Consistency report saved to {args.output}")
         return
-
-    # Load artifacts
-    artifacts_path = args.artifacts or str(PENDING_FILE)
-    has_artifacts = False
-    actionable = []
-
-    if os.path.exists(artifacts_path):
-        with open(artifacts_path) as f:
-            artifacts = json.load(f)
-        actionable = [a for a in artifacts
-                      if (a.get("persistence_status") != "persisted"
-                          and a.get("value", "low") in ("very_high", "medium"))
-                      or a.get("type") == "error_pattern"]
-        has_artifacts = len(actionable) > 0
 
     if not has_artifacts and not stale_items:
         print("No pending artifacts and state is consistent. Nothing to do.")

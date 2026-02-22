@@ -451,21 +451,101 @@ def execute_enrich_brain_doc(action: dict, dry_run: bool) -> dict:
     return result
 
 
-def execute_fix_skill(action: dict, dry_run: bool) -> dict:
-    """Propose a skill fix — write to review file, never auto-apply."""
-    skill = action.get("skill") or action.get("target", "unknown")
-    change = action.get("content") or action.get("change", "")
-    rationale = action.get("rationale", "")
+SKILLS_DIR = Path.home() / ".claude" / "skills"
 
-    proposal = {
-        "skill": skill,
-        "proposed_change": change,
-        "rationale": rationale,
-        "source": action.get("source_artifact", "unknown"),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
 
-    # Append to review file (human reviews at standup)
+def _apply_skill_patch(skill: str, patch_type: str, section_heading: str = None,
+                       anchor_text: str = None, new_content: str = None) -> tuple[bool, str]:
+    """Apply a structured patch to a SKILL.md file.
+
+    Returns (success, message).
+    """
+    skill_path = SKILLS_DIR / skill / "SKILL.md"
+    if not skill_path.exists():
+        return False, f"SKILL.md not found: {skill_path}"
+
+    content = skill_path.read_text()
+    if not new_content:
+        return False, "No new_content provided"
+
+    # Dedup: check if the new content is already present
+    if new_content.strip() in content:
+        return False, f"Content already present in SKILL.md for {skill}"
+
+    if patch_type == "append_to_section":
+        if not section_heading:
+            return False, "append_to_section requires section_heading"
+
+        # Find the section heading (## or ###)
+        lines = content.split("\n")
+        section_start = -1
+        section_end = len(lines)
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("#") and section_heading.lower() in stripped.lower():
+                section_start = i
+                # Find the end of this section (next heading of same or higher level)
+                heading_level = len(stripped) - len(stripped.lstrip("#"))
+                for j in range(i + 1, len(lines)):
+                    next_stripped = lines[j].strip()
+                    if next_stripped.startswith("#"):
+                        next_level = len(next_stripped) - len(next_stripped.lstrip("#"))
+                        if next_level <= heading_level:
+                            section_end = j
+                            break
+                break
+
+        if section_start < 0:
+            return False, f"Section '{section_heading}' not found in SKILL.md for {skill}"
+
+        # Insert new content at end of section (before next section)
+        insert_line = section_end
+        # Add a blank line before if needed
+        if insert_line > 0 and lines[insert_line - 1].strip():
+            new_lines = lines[:insert_line] + ["", new_content, ""] + lines[insert_line:]
+        else:
+            new_lines = lines[:insert_line] + [new_content, ""] + lines[insert_line:]
+
+        skill_path.write_text("\n".join(new_lines))
+        return True, f"Appended to section '{section_heading}'"
+
+    elif patch_type == "add_note_after":
+        if not anchor_text:
+            return False, "add_note_after requires anchor_text"
+
+        lines = content.split("\n")
+        for i, line in enumerate(lines):
+            if anchor_text in line:
+                # Insert after this line
+                new_lines = lines[:i + 1] + [new_content] + lines[i + 1:]
+                skill_path.write_text("\n".join(new_lines))
+                return True, f"Added note after '{anchor_text[:40]}...'"
+
+        return False, f"Anchor text '{anchor_text[:40]}...' not found in SKILL.md for {skill}"
+
+    elif patch_type == "add_new_section":
+        # Append a new ## section at the end of the file
+        if not content.endswith("\n"):
+            content += "\n"
+        heading = section_heading or "Additional Notes"
+        content += f"\n## {heading}\n\n{new_content}\n"
+        skill_path.write_text(content)
+        return True, f"Added new section '## {heading}'"
+
+    elif patch_type == "report_bug":
+        # Bug reports are always proposals, never auto-applied
+        return False, "report_bug patches are always saved as proposals"
+
+    else:
+        return False, f"Unknown patch_type: {patch_type}"
+
+
+def _save_skill_proposal(proposal: dict) -> bool:
+    """Save a skill fix proposal with dedup check.
+
+    Returns True if saved, False if duplicate.
+    """
     review_path = KB_DIR / "skill-fixes-pending.json"
     existing = []
     if review_path.exists():
@@ -474,12 +554,71 @@ def execute_fix_skill(action: dict, dry_run: bool) -> dict:
         except json.JSONDecodeError:
             existing = []
 
+    # Dedup: same skill + same new_content = skip
+    for ex in existing:
+        if (ex.get("skill") == proposal.get("skill") and
+                ex.get("new_content") == proposal.get("new_content")):
+            return False
+
     existing.append(proposal)
+    review_path.parent.mkdir(parents=True, exist_ok=True)
+    review_path.write_text(json.dumps(existing, indent=2))
+    return True
 
-    if not dry_run:
-        review_path.write_text(json.dumps(existing, indent=2))
 
-    return {"status": "proposed" if not dry_run else "dry_run", "proposal": proposal}
+def execute_fix_skill(action: dict, dry_run: bool) -> dict:
+    """Apply or propose a SKILL.md fix based on structured patch instructions.
+
+    High-confidence additive patches (append_to_section, add_note_after) auto-apply.
+    Medium-confidence, non-additive, or report_bug patches are saved as proposals.
+    """
+    skill = action.get("skill") or action.get("target", "unknown")
+    patch_type = action.get("patch_type", "")
+    section_heading = action.get("section_heading")
+    anchor_text = action.get("anchor_text")
+    new_content = action.get("new_content") or action.get("content", "")
+    confidence = action.get("confidence", "low")
+    rationale = action.get("rationale", "")
+
+    proposal = {
+        "skill": skill,
+        "patch_type": patch_type,
+        "section_heading": section_heading,
+        "anchor_text": anchor_text,
+        "new_content": new_content,
+        "rationale": rationale,
+        "confidence": confidence,
+        "source": action.get("source_artifact", "unknown"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Determine whether to auto-apply or save as proposal
+    auto_apply = (
+        confidence == "high"
+        and patch_type in ("append_to_section", "add_note_after", "add_new_section")
+        and new_content
+    )
+
+    if dry_run:
+        proposal["would_auto_apply"] = auto_apply
+        return {"status": "dry_run", "proposal": proposal}
+
+    if auto_apply:
+        success, message = _apply_skill_patch(
+            skill, patch_type, section_heading, anchor_text, new_content
+        )
+        if success:
+            return {"status": "success", "message": message, "auto_applied": True}
+        else:
+            # Auto-apply failed — fall through to save as proposal
+            proposal["auto_apply_failed"] = message
+
+    # Save as proposal for standup review
+    saved = _save_skill_proposal(proposal)
+    if saved:
+        return {"status": "proposed", "proposal": proposal}
+    else:
+        return {"status": "skipped", "reason": "Duplicate proposal"}
 
 
 # Action type → executor function
@@ -734,15 +873,36 @@ def generate_review(report: dict = None) -> str:
             lines.append(f"    → {c.get('recommendation', 'review needed')}")
         lines.append("")
 
-    # Pending skill fixes
+    # Auto-applied skill fixes (from this run)
+    auto_applied = [r for r in report.get("results", [])
+                    if r.get("action") == "fix_skill" and r.get("auto_applied")]
+    if auto_applied:
+        lines.append("**Skill docs auto-updated** (verify correctness):")
+        for r in auto_applied:
+            lines.append(f"  [+] {r.get('target', '?')}: {r.get('message', '')}")
+        lines.append("")
+
+    # Pending skill fixes (proposals)
     skill_fixes = KB_DIR / "skill-fixes-pending.json"
     if skill_fixes.exists():
         try:
             fixes = json.loads(skill_fixes.read_text())
             if fixes:
                 lines.append(f"**Skill fixes pending review** ({len(fixes)}):")
-                for fix in fixes:
-                    lines.append(f"  - {fix.get('skill', '?')}: {fix.get('proposed_change', '')[:80]}")
+                for i, fix in enumerate(fixes, 1):
+                    skill = fix.get('skill', '?')
+                    patch_type = fix.get('patch_type', '?')
+                    section = fix.get('section_heading', '')
+                    content_preview = fix.get('new_content', fix.get('proposed_change', ''))[:80]
+                    lines.append(f"  [{i}] {skill} ({patch_type})")
+                    if section:
+                        lines.append(f"      Section: {section}")
+                    lines.append(f"      Content: {content_preview}")
+                    if fix.get('rationale'):
+                        lines.append(f"      Why: {fix['rationale'][:100]}")
+                lines.append("")
+                lines.append("  Use `pipeline.py --show-skill-fixes` to see full details")
+                lines.append("  Use `pipeline.py --apply-skill-fix all` to apply approved fixes")
                 lines.append("")
         except json.JSONDecodeError:
             pass

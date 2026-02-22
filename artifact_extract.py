@@ -407,12 +407,23 @@ def main():
     except ImportError:
         pass  # Graceful degradation
 
+    # Parse tool error sequences from the session JSONL
+    tool_errors = []
+    try:
+        artifact_offset = _get_artifact_offset(session_path) if not args.no_incremental else -1
+        tool_errors = _parse_tool_error_sequences(session_path, offset=artifact_offset)
+        if tool_errors:
+            print(f"Tool errors found: {len(tool_errors)} error sequence(s)")
+    except Exception as e:
+        print(f"Warning: tool error parsing failed: {e}", file=sys.stderr)
+
     print(f"Extracting artifacts from {len(transcript)} chars...")
     print(f"Model: {args.model} | Domain: {domain or 'unknown'}")
     print()
 
-    # Call model with context frame
-    result = call_extraction_model(transcript, args.model, context_frame)
+    # Call model with context frame and tool errors
+    result = call_extraction_model(transcript, args.model, context_frame,
+                                    tool_errors=tool_errors if tool_errors else None)
 
     artifacts = result.get("artifacts", [])
     errors = result.get("error_patterns", [])

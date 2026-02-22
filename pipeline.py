@@ -270,6 +270,148 @@ def dismiss_proposals():
         print("No proposals to dismiss.")
 
 
+# --- Skill fix management ---
+
+def show_skill_fixes():
+    """Show pending skill fix proposals with full details."""
+    if not SKILL_FIXES_FILE.exists():
+        print("No pending skill fixes.")
+        return []
+
+    try:
+        fixes = json.loads(SKILL_FIXES_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        print("Error reading skill fixes file.")
+        return []
+
+    if not fixes:
+        print("No pending skill fixes.")
+        return []
+
+    print(f"**{len(fixes)} skill fix proposal(s) awaiting review:**\n")
+    for i, fix in enumerate(fixes, 1):
+        skill = fix.get("skill", "?")
+        patch_type = fix.get("patch_type", "?")
+        section = fix.get("section_heading", "")
+        anchor = fix.get("anchor_text", "")
+        content = fix.get("new_content", fix.get("proposed_change", ""))
+        confidence = fix.get("confidence", "?")
+        rationale = fix.get("rationale", "")
+        source = fix.get("source", "?")
+
+        print(f"  [{i}] Skill: {skill}")
+        print(f"      Patch type: {patch_type} | Confidence: {confidence}")
+        if section:
+            print(f"      Target section: {section}")
+        if anchor:
+            print(f"      Anchor text: {anchor[:60]}")
+        if content:
+            print(f"      Content to insert:")
+            for line in content.split("\n")[:5]:
+                print(f"        {line}")
+            if content.count("\n") > 4:
+                print(f"        ... ({content.count(chr(10)) - 4} more lines)")
+        if rationale:
+            print(f"      Rationale: {rationale[:150]}")
+        print(f"      Source: {source}")
+        print()
+
+    return fixes
+
+
+def apply_skill_fixes(indices: str, dry_run: bool = False):
+    """Apply approved skill fix proposals.
+
+    Usage:
+        pipeline.py --apply-skill-fix 1,3     # apply fixes 1 and 3
+        pipeline.py --apply-skill-fix all      # apply all fixes
+    """
+    if not SKILL_FIXES_FILE.exists():
+        print("No pending skill fixes.")
+        return
+
+    try:
+        fixes = json.loads(SKILL_FIXES_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        print("Error reading skill fixes file.")
+        return
+
+    if not fixes:
+        print("No pending skill fixes to apply.")
+        return
+
+    # Parse indices
+    if indices.strip().lower() == "all":
+        selected = list(range(len(fixes)))
+    else:
+        try:
+            selected = [int(x.strip()) - 1 for x in indices.split(",")]
+            for idx in selected:
+                if idx < 0 or idx >= len(fixes):
+                    print(f"Invalid index: {idx + 1} (valid: 1-{len(fixes)})")
+                    return
+        except ValueError:
+            print(f"Invalid indices format: '{indices}'. Use comma-separated numbers or 'all'.")
+            return
+
+    # Import the patch function from executor
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from executor import _apply_skill_patch
+
+    applied = 0
+    failed = 0
+    for idx in selected:
+        fix = fixes[idx]
+        skill = fix.get("skill", "?")
+        patch_type = fix.get("patch_type", "")
+        section_heading = fix.get("section_heading")
+        anchor_text = fix.get("anchor_text")
+        new_content = fix.get("new_content", fix.get("proposed_change", ""))
+
+        print(f"  [{idx + 1}] {skill} ({patch_type})...", end=" ")
+
+        if dry_run:
+            print("[DRY RUN — would apply]")
+            applied += 1
+            continue
+
+        if not patch_type or patch_type == "report_bug":
+            print("[SKIP — report_bug, not auto-applicable]")
+            continue
+
+        success, message = _apply_skill_patch(
+            skill, patch_type, section_heading, anchor_text, new_content
+        )
+        if success:
+            print(f"[OK] {message}")
+            applied += 1
+        else:
+            print(f"[FAILED] {message}")
+            failed += 1
+
+    # Remove applied fixes from the pending file
+    if not dry_run:
+        remaining = [f for i, f in enumerate(fixes) if i not in selected]
+        SKILL_FIXES_FILE.write_text(json.dumps(remaining, indent=2))
+        print(f"\nApplied {applied}, failed {failed}. {len(remaining)} fix(es) remaining.")
+    else:
+        print(f"\n[DRY RUN] Would apply {applied} fix(es).")
+
+
+def dismiss_skill_fixes():
+    """Dismiss all pending skill fix proposals."""
+    if SKILL_FIXES_FILE.exists():
+        try:
+            fixes = json.loads(SKILL_FIXES_FILE.read_text())
+            count = len(fixes)
+        except (json.JSONDecodeError, OSError):
+            count = 0
+        SKILL_FIXES_FILE.write_text("[]")
+        print(f"Dismissed {count} skill fix proposal(s).")
+    else:
+        print("No skill fixes to dismiss.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Reconciliation Pipeline — orchestrates artifact extraction, reconciliation, and execution"
@@ -287,6 +429,12 @@ def main():
                         help="Approve proposals by index (e.g., '1,3' or 'all')")
     parser.add_argument("--dismiss-proposals", action="store_true",
                         help="Dismiss all pending proposals without executing")
+    parser.add_argument("--show-skill-fixes", action="store_true",
+                        help="Show pending skill fix proposals")
+    parser.add_argument("--apply-skill-fix", metavar="INDICES",
+                        help="Apply skill fixes by index (e.g., '1,3' or 'all')")
+    parser.add_argument("--dismiss-skill-fixes", action="store_true",
+                        help="Dismiss all pending skill fix proposals")
 
     args = parser.parse_args()
 
@@ -318,13 +466,27 @@ def main():
         dismiss_proposals()
         return
 
+    if args.show_skill_fixes:
+        show_skill_fixes()
+        return
+
+    if args.apply_skill_fix:
+        apply_skill_fixes(args.apply_skill_fix, dry_run=args.dry_run)
+        return
+
+    if args.dismiss_skill_fixes:
+        dismiss_skill_fixes()
+        return
+
     if args.plan:
         # Execute a specific action plan
         return run_executor(args.plan, dry_run=args.dry_run)
 
     if args.reconcile or (not args.status and not args.show_pending and not args.clear_pending
                           and not args.plan and not args.show_proposals
-                          and not args.approve and not args.dismiss_proposals):
+                          and not args.approve and not args.dismiss_proposals
+                          and not args.show_skill_fixes and not args.apply_skill_fix
+                          and not args.dismiss_skill_fixes):
         # Default: run reconciliation
         output = args.output or "/tmp/reconciliation-plan.json"
         exit_code = run_reconcile(
