@@ -226,7 +226,7 @@ GIT_REPOS = [
 ]
 
 
-def load_git_history(days: int = 3) -> str:
+def load_git_history(days: int = 7) -> str:
     """Load recent git commit history across tracked repos."""
     sections = []
     for repo in GIT_REPOS:
@@ -288,7 +288,119 @@ def load_system_state() -> str:
 {git_history}"""
 
 
-# --- Reconciliation model call ---
+STATE_CONSISTENCY_PROMPT = """You are a state-consistency checker for a personal knowledge management system.
+
+You receive the CURRENT STATE of the user's system: Active Context (strategic priorities), Konban board (task tracker), Brain doc index (knowledge base), and recent git commits.
+
+Your job: find items in Active Context or Konban that are stale — the work they describe is already done (fully or partially) based on git commit evidence.
+
+PROCEDURE — follow these steps:
+1. List each Active Context priority/milestone and each Konban "Doing"/"To Do" task
+2. For each item, scan ALL git commits for semantic matches (not just keyword matches)
+3. If a priority has SUB-ITEMS (e.g., workstreams a/b/c), check each sub-item independently
+4. Flag any item (or sub-item) where git commits show the work is shipped
+
+MATCHING RULES:
+- Match SEMANTICALLY, not just by keyword. "increase character limits ~3x" matches "increase profile char limits"
+- "Werdegang" = "Mein Weg zu dieser Arbeit" (same field, German synonyms)
+- feat() commits = feature shipped. fix() commits for the same area = iterative work on that feature.
+- Multiple commits touching the same feature area = strong signal the work is done
+- A commit prefixed with "Ship:" means explicit production deployment
+
+WHAT TO FLAG:
+- Items where ALL the described work is done → flag as "completed"
+- Items where SOME sub-items are done → flag as "partially_completed" with details on what's done vs remaining
+- Konban tasks in "Doing" or "To Do" where the work is visible in commits
+
+EXAMPLE MATCH:
+  Active Context says: "Profile depth — increase profile char limits + add Werdegang field"
+  Git shows: "e56fd42 feat(profile): increase character limits ~3x and add 'Mein Weg zu dieser Arbeit' field"
+  → This is a MATCH. "Mein Weg zu dieser Arbeit" IS the Werdegang field. Flag it.
+
+EXAMPLE NON-MATCH:
+  Active Context says: "Passwordless patient accounts (EARTH-292)"
+  Git shows: "fix(portal): default to Profile tab for new therapists"
+  → NOT a match. The commit is about therapist portal, not patient accounts.
+
+Return ONLY valid JSON:
+{
+  "stale_items": [
+    {
+      "source": "active_context | konban",
+      "item": "what's claimed as in-progress or planned",
+      "status": "completed | partially_completed",
+      "evidence": "git commit hash(es) and what they did",
+      "remaining": "what sub-items are NOT yet done (null if fully completed)",
+      "recommendation": "what should be updated"
+    }
+  ],
+  "summary": "1 sentence summary"
+}
+
+If nothing is stale, return empty stale_items array. But be thorough — missing a stale item means the user wastes attention on work that's already done."""
+
+
+# --- Model calls ---
+
+def call_state_consistency_check(system_state: str, model: str = DEFAULT_MODEL) -> dict:
+    """Check system state for internal inconsistencies (Active Context vs git, etc.)."""
+    api_key = get_api_key()
+
+    user_content = (
+        "Check this system state for inconsistencies.\n\n"
+        f"<system_state>\n{system_state}\n</system_state>\n\n"
+        "Return ONLY valid JSON."
+    )
+
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": STATE_CONSISTENCY_PROMPT},
+            {"role": "user", "content": user_content}
+        ],
+        "temperature": 0.1,
+        "provider": {"data_collection": "deny"},
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        OPENROUTER_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://github.com/kkaufmann/knowledge-base",
+            "X-Title": "KB State Consistency",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.HTTPError, urllib.error.URLError) as e:
+        print(f"  State consistency check failed: {e}", file=sys.stderr)
+        return {"stale_items": [], "summary": "Check failed"}
+
+    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if not content:
+        return {"stale_items": [], "summary": "Empty response"}
+
+    # Parse JSON (same cleanup as reconciliation)
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+        content = content.rsplit("```", 1)[0]
+    if "<think>" in content:
+        content = content.split("</think>")[-1].strip()
+    if not content.startswith("{"):
+        idx = content.find("{")
+        if idx >= 0:
+            content = content[idx:]
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return {"stale_items": [], "summary": "Parse failed"}
+
 
 def call_reconciliation_model(artifacts_json: str, system_state: str, model: str = DEFAULT_MODEL) -> dict:
     """Call GLM-5 to reconcile artifacts against system state."""
@@ -372,48 +484,81 @@ def main():
     parser.add_argument("--output", "-o", help="Save action plan to JSON file")
     parser.add_argument("--execute", action="store_true",
                         help="Pass action plan directly to executor")
+    parser.add_argument("--consistency-only", action="store_true",
+                        help="Only run state consistency check (no artifact reconciliation)")
 
     args = parser.parse_args()
 
-    # Load artifacts
-    artifacts_path = args.artifacts or str(PENDING_FILE)
-    if not os.path.exists(artifacts_path):
-        print("No pending artifacts found.")
-        return
-
-    with open(artifacts_path) as f:
-        artifacts = json.load(f)
-
-    if not artifacts:
-        print("No pending artifacts to reconcile.")
-        return
-
-    # Filter to actionable
-    actionable = [a for a in artifacts
-                  if (a.get("persistence_status") != "persisted"
-                      and a.get("value", "low") in ("very_high", "medium"))
-                  or a.get("type") == "error_pattern"]
-
-    if not actionable:
-        print(f"All {len(artifacts)} artifacts are already persisted or low value.")
-        if not args.dry_run and artifacts_path == str(PENDING_FILE):
-            PENDING_FILE.write_text("[]")
-            print("Cleared pending file.")
-        return
-
-    print(f"Reconciling {len(actionable)} artifact(s) (of {len(artifacts)} total)...")
-    print()
-
-    # Load live system state
+    # Always load system state (needed for both consistency check and reconciliation)
     system_state = load_system_state()
     print()
 
-    # Call reconciliation model
-    artifacts_json = json.dumps(actionable, indent=2, default=str)
-    total_input = len(artifacts_json) + len(system_state)
-    print(f"Calling {args.model} ({total_input} chars total input)...")
+    # State consistency check — runs always, even with no artifacts
+    print(f"Running state consistency check ({args.model})...")
+    consistency = call_state_consistency_check(system_state, args.model)
+    stale_items = consistency.get("stale_items", [])
+    if stale_items:
+        print(f"\n  STALE STATE DETECTED ({len(stale_items)} item(s)):")
+        for item in stale_items:
+            print(f"  [{item.get('source', '?')}] {item.get('item', '?')}")
+            print(f"    Evidence: {item.get('evidence', '?')}")
+            print(f"    → {item.get('recommendation', '?')}")
+            print()
+    else:
+        print("  State is consistent.")
+    print()
 
-    action_plan = call_reconciliation_model(artifacts_json, system_state, args.model)
+    if args.consistency_only:
+        if args.output:
+            with open(args.output, "w") as f:
+                json.dump(consistency, f, indent=2, default=str)
+            print(f"Consistency report saved to {args.output}")
+        return
+
+    # Load artifacts
+    artifacts_path = args.artifacts or str(PENDING_FILE)
+    has_artifacts = False
+    actionable = []
+
+    if os.path.exists(artifacts_path):
+        with open(artifacts_path) as f:
+            artifacts = json.load(f)
+        actionable = [a for a in artifacts
+                      if (a.get("persistence_status") != "persisted"
+                          and a.get("value", "low") in ("very_high", "medium"))
+                      or a.get("type") == "error_pattern"]
+        has_artifacts = len(actionable) > 0
+
+    if not has_artifacts and not stale_items:
+        print("No pending artifacts and state is consistent. Nothing to do.")
+        if artifacts_path == str(PENDING_FILE) and os.path.exists(artifacts_path):
+            PENDING_FILE.write_text("[]")
+        return
+
+    # Build action plan — combine artifact reconciliation + consistency findings
+    action_plan = {"proposed_actions": [], "conflicts_flagged": [], "summary": ""}
+
+    # Artifact reconciliation (if any)
+    if has_artifacts:
+        print(f"Reconciling {len(actionable)} artifact(s)...")
+        artifacts_json = json.dumps(actionable, indent=2, default=str)
+        total_input = len(artifacts_json) + len(system_state)
+        print(f"Calling {args.model} ({total_input} chars total input)...")
+        action_plan = call_reconciliation_model(artifacts_json, system_state, args.model)
+
+    # Merge stale state findings as conflicts
+    for item in stale_items:
+        status = item.get("status", "completed")
+        remaining = item.get("remaining")
+        detail = f"[{status}] {item.get('evidence', '')}"
+        if remaining:
+            detail += f" | Remaining: {remaining}"
+        detail += f" — {item.get('recommendation', 'Review needed')}"
+        action_plan.setdefault("conflicts_flagged", []).append({
+            "artifact": f"[state-check] {item.get('source', '?')}",
+            "conflicts_with": item.get("item", "?"),
+            "recommendation": detail,
+        })
 
     # Display results
     actions = action_plan.get("proposed_actions", [])
