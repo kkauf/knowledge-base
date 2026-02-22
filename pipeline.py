@@ -119,20 +119,67 @@ def show_status():
 
 
 def run_reconcile(dry_run: bool = False, execute: bool = False, output: str = None):
-    """Run Stage 2 reconciliation."""
-    cmd = ["python3", str(RECONCILE_SCRIPT)]
-    if dry_run:
-        cmd.append("--dry-run")
-    if execute:
-        cmd.append("--execute")
-    if output:
-        cmd.extend(["--output", output])
+    """Run Stage 2 reconciliation, batching if artifact count exceeds threshold."""
+    BATCH_SIZE = 15  # GLM-5 times out with >15 artifacts + system state context
+
+    # Check artifact count to decide on batching
+    pending_count = 0
+    if PENDING_FILE.exists():
+        try:
+            pending = json.loads(PENDING_FILE.read_text())
+            pending_count = len(pending)
+        except (json.JSONDecodeError, OSError):
+            pass
 
     print("=" * 60)
     print("STAGE 2: Reconciliation")
     print("=" * 60)
-    result = subprocess.run(cmd, timeout=300)
-    return result.returncode
+
+    if pending_count <= BATCH_SIZE:
+        # Small enough for a single call
+        cmd = ["python3", str(RECONCILE_SCRIPT)]
+        if dry_run:
+            cmd.append("--dry-run")
+        if execute:
+            cmd.append("--execute")
+        if output:
+            cmd.extend(["--output", output])
+        result = subprocess.run(cmd, timeout=600)
+        return result.returncode
+    else:
+        # Batch: split artifacts, run reconciliation per batch
+        print(f"Batching: {pending_count} artifacts in groups of {BATCH_SIZE}")
+        all_pending = json.loads(PENDING_FILE.read_text())
+        overall_exit = 0
+
+        for i in range(0, len(all_pending), BATCH_SIZE):
+            batch = all_pending[i:i + BATCH_SIZE]
+            batch_num = i // BATCH_SIZE + 1
+            total_batches = (len(all_pending) + BATCH_SIZE - 1) // BATCH_SIZE
+            print(f"\n--- Batch {batch_num}/{total_batches} ({len(batch)} artifacts) ---")
+
+            # Write batch to pending file
+            PENDING_FILE.write_text(json.dumps(batch, indent=2))
+
+            cmd = ["python3", str(RECONCILE_SCRIPT)]
+            if dry_run:
+                cmd.append("--dry-run")
+            if execute:
+                cmd.append("--execute")
+            if output:
+                cmd.extend(["--output", output])
+
+            try:
+                result = subprocess.run(cmd, timeout=600)
+                if result.returncode != 0:
+                    overall_exit = result.returncode
+            except subprocess.TimeoutExpired:
+                print(f"  Batch {batch_num} timed out — skipping")
+                overall_exit = 1
+
+        # Clear pending file (batches handle their own cleanup via --execute)
+        PENDING_FILE.write_text("[]")
+        return overall_exit
 
 
 def run_executor(plan_file: str, dry_run: bool = False):
