@@ -379,9 +379,9 @@ The Brain has a hierarchical structure with typed sections. The daemon routes do
 
 **Phase 2 closing test (Feb 22):** Drained 6 daemon-produced pending artifacts. 2 Brain docs auto-created (EARTH-294 root cause analysis, profile enrichment concept), 4 correctly filtered (ephemeral/minor). State consistency check flagged profile depth workstream (a) as shipped. Zero failures. Pipeline handles real daemon output end-to-end.
 
-### Phase 3: Standup integration (planned)
+### Phase 3: Standup integration (in progress)
 
-22. **Interactive approval at standup** — Standup Claude reads Tier 2 proposals and presents as batch yes/no decisions. Executes approved actions in-session.
+22. ~~**Interactive approval at standup**~~ Done: `pipeline.py --show-proposals`, `--approve <indices|all>`, `--dismiss-proposals`. Human approval overrides confidence to "high" and executes via the standard executor. Standup protocol updated with step 3a: present YOUR CALL proposals, handle natural-language approval ("approve all", "1 and 3 yes, skip 2"), execute approved actions, report results. Stale state conflicts are informational for next Kraken session.
 23. **Rollback capability** — `pipeline.py --rollback <action-id>` undoes a specific auto-executed action using audit log's "previous value" field.
 24. **Feedback loop** — Log rejections of Tier 2 proposals. Over time, tune confidence thresholds based on rejection rate.
 
