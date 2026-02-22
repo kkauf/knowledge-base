@@ -93,10 +93,16 @@ CRITICAL — CONTENT REPRODUCTION RULES:
 - If you can't fit the full content, prioritize the parts that are NOT persisted elsewhere (the gap between what was saved and what was discussed).
 - For "partial" persistence: focus on what was NOT saved. The Brain/Konban already has the summary — reproduce the reasoning, data, and nuance that was lost.
 
-Also identify ERROR PATTERNS: places where the assistant used a tool incorrectly, got an error, and had to retry. These are skill improvement signals.
+Also identify ERROR PATTERNS: places where the assistant used a tool suboptimally — not just hard errors, but also wasted round trips. Examples:
+- Hard errors: wrong arg types, invalid flags, exceptions
+- Soft misses: "project not found", "no active tasks matching X" then retrying with different name
+- Discovery calls: running --help or bare command to learn the API (means SKILL.md was insufficient)
+- Parameter hunting: multiple retries with slightly different args until one works
+
+These are ALL skill improvement signals — each wasted call is a SKILL.md doc gap.
 
 IMPORTANT — TOOL ERROR DATA:
-If a <tool_errors> section is included below the transcript, it contains STRUCTURED error sequences extracted directly from tool_use/tool_result blocks (the transcript text may not show these). Use this data to produce more precise error_patterns. Each entry shows the failed command, error output, and (if available) the successful retry command.
+If a <tool_errors> section is included below the transcript, it contains STRUCTURED suboptimal call sequences extracted directly from tool_use/tool_result blocks (the transcript text may not show these). Use this data to produce more precise error_patterns. Each entry shows the failed/wasted command, output, and (if available) the successful command.
 
 If the transcript contains a section marked "[--- CONTEXT FROM PREVIOUS EXTRACTION ---]", that section is already processed. Only extract artifacts from the "[--- NEW MESSAGES BELOW ---]" section. Use the context section only for understanding references in the new messages.
 
@@ -134,9 +140,12 @@ Return ONLY valid JSON:
 For error_patterns:
 - "skill": the skill directory name (e.g., "konban", "linear", "gcal")
 - "script": the helper script filename (e.g., "notion-api.py", "linear-api.py")
-- "error_type": classify the error — wrong_arg_type (e.g., string where int expected), invalid_value (e.g., "High" when "3" needed), case_sensitivity (e.g., "feature" vs "Feature"), missing_flag (flag doesn't exist), other
-- "correct_usage": the CORRECT way to invoke the command (from the successful retry or your analysis)
-- "doc_gap": true if this error is likely because the SKILL.md documentation is missing or unclear about this constraint. false if the info is probably already documented and Claude just ignored it.
+- "error_type": classify the issue:
+  * Hard errors: wrong_arg_type (string where int expected), invalid_value ("High" when "3" needed), case_sensitivity ("feature" vs "Feature"), missing_flag (flag doesn't exist)
+  * Inefficiencies: inefficient_lookup (searched for wrong name/entity, "not found" then retry), discovery_call (ran --help or bare command to discover API — SKILL.md was insufficient)
+  * Fallback: other
+- "correct_usage": the CORRECT way to invoke the command (from the successful retry or your analysis). For inefficient_lookup, include the correct entity name/search term.
+- "doc_gap": true if this issue is likely because the SKILL.md documentation is missing or unclear about this constraint (e.g., valid project names, exact entity names, API shape). false if the info is probably already documented and Claude just ignored it.
 
 If no artifacts or error patterns found, return empty arrays. Do NOT hallucinate artifacts that aren't in the transcript."""
 

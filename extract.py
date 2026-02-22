@@ -480,10 +480,13 @@ _SKILL_HELPER_RE = re.compile(
 
 
 def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dict]:
-    """Parse tool_use + tool_result blocks to find skill helper error sequences.
+    """Parse tool_use + tool_result blocks to find suboptimal skill helper calls.
 
-    Reads JSONL and extracts Bash calls to ~/.claude/skills/*/  helpers,
-    identifies error → retry → success sequences.
+    Detects both hard errors AND inefficient patterns:
+    - Hard errors: invalid args, unrecognized flags, exceptions
+    - Soft misses: "not found", "no matching" — wasted round trips
+    - Discovery calls: --help, bare invocation — SKILL.md was insufficient
+    - Parameter hunting: multiple retries with slight arg variations
 
     Args:
         session_path: Path to JSONL session file
@@ -496,7 +499,8 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
             "failed_command": "python3 ... --priority High",
             "error_text": "Error: invalid priority ...",
             "successful_command": "python3 ... --priority 3" or null,
-            "error_type": "wrong_arg_type" | "invalid_value" | "case_sensitivity" | "missing_flag" | "other",
+            "error_type": "wrong_arg_type" | "invalid_value" | "case_sensitivity" |
+                          "missing_flag" | "inefficient_lookup" | "discovery_call" | "other",
         }]
     """
     # Step 1: Extract all tool_use and tool_result blocks with ordering
@@ -542,8 +546,8 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
                     }
                     block_index += 1
 
-    # Step 2: Match Bash calls to skill helpers and identify errors
-    skill_calls = []  # ordered list of {skill, script, command, result, is_error, order}
+    # Step 2: Match Bash calls to skill helpers and classify each call
+    skill_calls = []  # ordered list of {skill, script, command, result, issue, order}
 
     for tool_id, call in sorted(tool_calls.items(), key=lambda x: x[1]["order"]):
         if call["name"] != "Bash":
@@ -555,6 +559,7 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
 
         skill_name = match.group(1)
         script_name = match.group(2)
+        args_text = match.group(3).strip()
         result = tool_results.get(tool_id, {})
         result_text = result.get("content", "")
         if isinstance(result_text, list):
@@ -563,47 +568,63 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
                 if isinstance(b, dict) and b.get("type") == "text"
             )
 
-        is_error = any(indicator in result_text.lower() for indicator in [
+        result_lower = result_text.lower()
+
+        # Classify: hard error, soft miss, discovery call, or clean
+        issue = None
+        if any(indicator in result_lower for indicator in [
             "error:", "traceback", "exception", "failed",
-            "invalid", "not found", "usage:", "unrecognized",
-        ])
+            "invalid", "unrecognized",
+        ]):
+            issue = "error"
+        elif any(indicator in result_lower for indicator in [
+            "not found", "no active tasks", "no matching",
+            "no results", "does not exist", "0 results",
+        ]):
+            issue = "soft_miss"
+        elif "--help" in command or (args_text and args_text.startswith("2>&1")):
+            issue = "discovery"
+        elif "usage:" in result_lower and not args_text:
+            issue = "discovery"
 
         skill_calls.append({
             "skill": skill_name,
             "script": script_name,
             "command": command,
             "result": result_text[:2000],  # Truncate long results
-            "is_error": is_error,
+            "issue": issue,
             "order": call["order"],
         })
 
-    # Step 3: Group into error → retry sequences per skill+script
+    # Step 3: Group into suboptimal → retry sequences per skill+script
+    # Catches both hard errors and inefficient patterns (soft misses, discovery calls)
     error_sequences = []
     i = 0
     while i < len(skill_calls):
         call = skill_calls[i]
-        if not call["is_error"]:
+        if not call["issue"]:
             i += 1
             continue
 
-        # Found an error — look ahead for retries/success with same skill+script
+        # Found a suboptimal call — look ahead for retries/success with same skill+script
         sequence = [call]
         j = i + 1
         while j < len(skill_calls):
             next_call = skill_calls[j]
             if next_call["skill"] == call["skill"] and next_call["script"] == call["script"]:
                 sequence.append(next_call)
-                if not next_call["is_error"]:
-                    break  # Found the successful retry
+                if not next_call["issue"]:
+                    break  # Found the successful call
             j += 1
 
-        # Classify the error type
+        # Classify the issue type
         error_text = call["result"]
         error_type = _classify_error_type(call["command"], error_text,
-                                           sequence[-1]["command"] if len(sequence) > 1 else None)
+                                           sequence[-1]["command"] if len(sequence) > 1 else None,
+                                           issue_hint=call["issue"])
 
         successful_cmd = None
-        if len(sequence) > 1 and not sequence[-1]["is_error"]:
+        if len(sequence) > 1 and not sequence[-1]["issue"]:
             successful_cmd = sequence[-1]["command"]
 
         error_sequences.append({
@@ -621,9 +642,27 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
     return error_sequences
 
 
-def _classify_error_type(failed_cmd: str, error_text: str, success_cmd: str = None) -> str:
-    """Classify a skill helper error into a category."""
+def _classify_error_type(failed_cmd: str, error_text: str, success_cmd: str = None,
+                         issue_hint: str = None) -> str:
+    """Classify a skill helper issue into a category.
+
+    Categories:
+        Hard errors: wrong_arg_type, invalid_value, case_sensitivity, missing_flag
+        Inefficiencies: inefficient_lookup, discovery_call, parameter_hunting
+        Fallback: other
+    """
     error_lower = error_text.lower()
+
+    # Discovery calls: --help, bare invocation, usage output
+    if issue_hint == "discovery":
+        return "discovery_call"
+
+    # Soft misses: "not found", "no matching", etc. — wasted round trip
+    if issue_hint == "soft_miss":
+        # Check if the successful retry used different search terms / entity names
+        if success_cmd and success_cmd != failed_cmd:
+            return "inefficient_lookup"
+        return "inefficient_lookup"
 
     # Case sensitivity: error mentions case or the fix changes capitalization
     if success_cmd:
