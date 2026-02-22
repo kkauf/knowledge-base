@@ -377,6 +377,8 @@ The Brain has a hierarchical structure with typed sections. The daemon routes do
 20. ~~**Add git commit history as data source**~~ Done: `load_git_history(days=7)` scans kaufmann-health and knowledge-base repos. Git commits are the strongest "done" signal — more reliable than conversation language. Reconciler uses `Ship:` prefix for explicit deployment, `feat()` commits for features shipped.
 21. ~~**State consistency check**~~ Done: Proactive comparison of Active Context priorities and Konban tasks against git commits. Runs on every pipeline invocation (even with no pending artifacts). Uses semantic matching with German synonym support. Flags both fully completed and partially completed items. Stale findings merge into action plan as conflicts for standup review.
 
+**Phase 2 closing test (Feb 22):** Drained 6 daemon-produced pending artifacts. 2 Brain docs auto-created (EARTH-294 root cause analysis, profile enrichment concept), 4 correctly filtered (ephemeral/minor). State consistency check flagged profile depth workstream (a) as shipped. Zero failures. Pipeline handles real daemon output end-to-end.
+
 ### Phase 3: Standup integration (planned)
 
 22. **Interactive approval at standup** — Standup Claude reads Tier 2 proposals and presents as batch yes/no decisions. Executes approved actions in-session.
