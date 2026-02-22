@@ -15,11 +15,18 @@ MARKER="$KB_DIR/.last-extraction"
 LOG="$KB_DIR/extraction.log"
 EXTRACT="$KB_DIR/extract.py"
 ARTIFACT_EXTRACT="$HOME/github/knowledge-base/artifact_extract.py"
+CONTEXT_FRAME="$HOME/github/knowledge-base/context_frame.py"
 MAX_PER_RUN=5  # Cap to avoid hammering the API on large backlogs
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
 }
+
+# Refresh context frame (TTL-based, only regenerates if stale)
+# This gives extraction prompts awareness of active commitments
+if [ -f "$CONTEXT_FRAME" ]; then
+    python3 "$CONTEXT_FRAME" --refresh >> "$LOG" 2>&1 || log "Context frame refresh failed (non-critical)"
+fi
 
 # Get last extraction time (epoch seconds), default to 0
 if [ -f "$MARKER" ]; then

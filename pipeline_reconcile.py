@@ -132,8 +132,16 @@ Every action MUST include a "confidence" field: "high", "medium", or "low".
 
 Confidence is based on: signal strength (explicit > implicit), recency (today > last week), corroboration (multiple sessions > single mention), and explicitness (tool calls > verbal discussion).
 
+COMMITMENT UPDATES:
+When you receive a "commitment_update" artifact, map it to one or more actions on the matching Konban task:
+- "reschedule" → log_konban_task (log the schedule change) + update_konban_task (update title/due date if the task name contains a stale date reference)
+- "progress" → log_konban_task (log the progress)
+- "friction" → log_konban_task (log the friction signal — these are valuable behavioral data points)
+- "completion" → done_konban_task (if evidence is explicit) or log_konban_task (if signal is implicit)
+The "commitment_target" field in the artifact tells you which Konban task to target (fuzzy match against task titles in system state).
+
 PERMISSION MODEL (strict):
-- CAN: create_konban_task (tagged [daemon]), log_konban_task, done_konban_task (HIGH confidence only), create_brain_doc, enrich_brain_doc, fix_skill, no_action
+- CAN: create_konban_task (tagged [daemon]), log_konban_task, done_konban_task (HIGH confidence only), create_brain_doc, enrich_brain_doc, update_konban_task (title/due date only), fix_skill, no_action
 - CANNOT: delete anything, modify Active Context, send external comms
 
 DONE_KONBAN_TASK rules:
@@ -153,7 +161,7 @@ Return ONLY valid JSON:
 {
   "proposed_actions": [
     {
-      "type": "create_konban_task | log_konban_task | done_konban_task | create_brain_doc | enrich_brain_doc | fix_skill | no_action",
+      "type": "create_konban_task | log_konban_task | done_konban_task | update_konban_task | create_brain_doc | enrich_brain_doc | fix_skill | no_action",
       "title": "task or doc title (for create actions)",
       "target": "existing doc or task name (for enrich/log actions)",
       "section_name": "heading for the new section (for enrich_brain_doc only, e.g. 'Carlotta Interview Findings')",

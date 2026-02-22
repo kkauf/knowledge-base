@@ -37,6 +37,14 @@ IMPORTANT DISTINCTIONS:
 - EPHEMERAL TASKS: Things to do this week. "Contact institutes Monday." "Send booking link." DO NOT extract these.
 - DECISIONS: Choices made that change how things work. "Mandatory therapist onboarding going forward." "Konstantin handles document reviews."
 
+COMMITMENT TRACKING (requires CONTEXT FRAME):
+If a CONTEXT FRAME section is included below the transcript, it lists the user's active commitments (Konban tasks) and strategic priorities. When conversations reference these active commitments, the following ARE extractable as durable facts (not ephemeral):
+- Scheduling decisions: "moved MBA to Tuesday" → entity fact (schedule updated)
+- Progress signals: "finished part 1 of X" → entity fact (progress status)
+- Friction/difficulty signals: "struggling to commit to X", "keep postponing Y" → entity fact (commitment_friction)
+- Completion signals: "X is done", "submitted Y" → entity fact (status = completed)
+Attach these to the relevant entity (use the Konban task name or a related entity). If no context frame is present, treat scheduling as ephemeral (legacy behavior).
+
 Return ONLY valid JSON in this exact format:
 {
   "entities": [
@@ -461,6 +469,187 @@ def _parse_all_messages(session_path: str) -> list[dict]:
     return messages
 
 
+import re
+
+# Pattern to identify Bash calls to skill helper scripts
+_SKILL_HELPER_RE = re.compile(
+    r'(?:python3?\s+)?'
+    r'(?:~|/Users/\w+)/\.claude/skills/([^/]+)/([^\s]+\.py)\s*(.*)',
+    re.DOTALL,
+)
+
+
+def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dict]:
+    """Parse tool_use + tool_result blocks to find skill helper error sequences.
+
+    Reads JSONL and extracts Bash calls to ~/.claude/skills/*/  helpers,
+    identifies error → retry → success sequences.
+
+    Args:
+        session_path: Path to JSONL session file
+        offset: Only process messages after this index (-1 = all)
+
+    Returns list of dicts:
+        [{
+            "skill": "linear",
+            "script": "linear-api.py",
+            "failed_command": "python3 ... --priority High",
+            "error_text": "Error: invalid priority ...",
+            "successful_command": "python3 ... --priority 3" or null,
+            "error_type": "wrong_arg_type" | "invalid_value" | "case_sensitivity" | "missing_flag" | "other",
+        }]
+    """
+    # Step 1: Extract all tool_use and tool_result blocks with ordering
+    tool_calls = {}  # tool_use_id -> {name, input, index}
+    tool_results = {}  # tool_use_id -> {content, index}
+    block_index = 0
+
+    with open(session_path) as f:
+        for line_num, line in enumerate(f):
+            if offset >= 0 and line_num < offset:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            msg_type = msg.get("type", "")
+            inner = msg.get("message", {})
+            if not isinstance(inner, dict):
+                continue
+            content = inner.get("content", "")
+            if not isinstance(content, list):
+                continue
+
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+
+                if block.get("type") == "tool_use" and msg_type == "assistant":
+                    tool_calls[block.get("id", "")] = {
+                        "name": block.get("name", ""),
+                        "input": block.get("input", {}),
+                        "line": line_num,
+                        "order": block_index,
+                    }
+                    block_index += 1
+
+                elif block.get("type") == "tool_result" and msg_type == "user":
+                    tool_results[block.get("tool_use_id", "")] = {
+                        "content": block.get("content", ""),
+                        "line": line_num,
+                        "order": block_index,
+                    }
+                    block_index += 1
+
+    # Step 2: Match Bash calls to skill helpers and identify errors
+    skill_calls = []  # ordered list of {skill, script, command, result, is_error, order}
+
+    for tool_id, call in sorted(tool_calls.items(), key=lambda x: x[1]["order"]):
+        if call["name"] != "Bash":
+            continue
+        command = call["input"].get("command", "")
+        match = _SKILL_HELPER_RE.search(command)
+        if not match:
+            continue
+
+        skill_name = match.group(1)
+        script_name = match.group(2)
+        result = tool_results.get(tool_id, {})
+        result_text = result.get("content", "")
+        if isinstance(result_text, list):
+            result_text = "\n".join(
+                b.get("text", "") for b in result_text
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+
+        is_error = any(indicator in result_text.lower() for indicator in [
+            "error:", "traceback", "exception", "failed",
+            "invalid", "not found", "usage:", "unrecognized",
+        ])
+
+        skill_calls.append({
+            "skill": skill_name,
+            "script": script_name,
+            "command": command,
+            "result": result_text[:2000],  # Truncate long results
+            "is_error": is_error,
+            "order": call["order"],
+        })
+
+    # Step 3: Group into error → retry sequences per skill+script
+    error_sequences = []
+    i = 0
+    while i < len(skill_calls):
+        call = skill_calls[i]
+        if not call["is_error"]:
+            i += 1
+            continue
+
+        # Found an error — look ahead for retries/success with same skill+script
+        sequence = [call]
+        j = i + 1
+        while j < len(skill_calls):
+            next_call = skill_calls[j]
+            if next_call["skill"] == call["skill"] and next_call["script"] == call["script"]:
+                sequence.append(next_call)
+                if not next_call["is_error"]:
+                    break  # Found the successful retry
+            j += 1
+
+        # Classify the error type
+        error_text = call["result"]
+        error_type = _classify_error_type(call["command"], error_text,
+                                           sequence[-1]["command"] if len(sequence) > 1 else None)
+
+        successful_cmd = None
+        if len(sequence) > 1 and not sequence[-1]["is_error"]:
+            successful_cmd = sequence[-1]["command"]
+
+        error_sequences.append({
+            "skill": call["skill"],
+            "script": call["script"],
+            "failed_command": call["command"],
+            "error_text": error_text[:1000],
+            "successful_command": successful_cmd,
+            "error_type": error_type,
+        })
+
+        # Skip past the sequence we just processed
+        i = j + 1 if j < len(skill_calls) else i + 1
+
+    return error_sequences
+
+
+def _classify_error_type(failed_cmd: str, error_text: str, success_cmd: str = None) -> str:
+    """Classify a skill helper error into a category."""
+    error_lower = error_text.lower()
+
+    # Case sensitivity: error mentions case or the fix changes capitalization
+    if success_cmd:
+        # Compare args: if only case changed, it's case_sensitivity
+        failed_args = failed_cmd.lower()
+        success_args = success_cmd.lower()
+        if failed_args == success_args and failed_cmd != success_cmd:
+            return "case_sensitivity"
+
+    if "unrecognized" in error_lower or "unknown option" in error_lower or "no such" in error_lower:
+        return "missing_flag"
+
+    if "invalid" in error_lower or "not a valid" in error_lower or "must be" in error_lower:
+        if "type" in error_lower or "integer" in error_lower or "number" in error_lower:
+            return "wrong_arg_type"
+        return "invalid_value"
+
+    if "expected" in error_lower and ("int" in error_lower or "str" in error_lower or "number" in error_lower):
+        return "wrong_arg_type"
+
+    if "not found" in error_lower or "does not exist" in error_lower:
+        return "invalid_value"
+
+    return "other"
+
+
 def parse_session_jsonl(session_path: str) -> str:
     """Parse a Claude Code JSONL session file into a readable transcript.
 
@@ -494,11 +683,13 @@ def parse_session_incremental(session_path: str) -> tuple[str, int, int]:
     total = len(all_messages)
 
     if last_offset < 0:
-        # First time seeing this session — process last 50 messages (legacy compat)
-        start = max(0, total - 50)
+        # First time seeing this session — process ALL messages (not just last 50).
+        # The full session is valuable context; the extraction LLM truncation
+        # handles overly long transcripts, and the context frame gives it
+        # awareness of what to look for.
         context_msgs = []
-        new_msgs = all_messages[start:]
-        new_start = start
+        new_msgs = all_messages
+        new_start = 0
     else:
         # Incremental: context overlap from previous window + new messages
         new_start = last_offset + 1
@@ -636,10 +827,25 @@ def main():
         db.close()
         if domain_context:
             print(f"Domain: {domain} (injecting {domain_context.count(chr(10))} lines of context)")
+
+    # Load dynamic context frame (active commitments, priorities)
+    context_frame = ""
+    try:
+        from context_frame import load_context_frame
+        context_frame = load_context_frame()
+        if context_frame:
+            print(f"Context frame: {len(context_frame)} chars")
+    except ImportError:
+        pass  # Graceful degradation if context_frame.py not available
     print()
 
-    # Extract
-    extractions = call_extraction_model(transcript, args.model, domain_context)
+    # Extract — combine domain context with context frame
+    combined_context = domain_context
+    if context_frame:
+        if combined_context:
+            combined_context += "\n\n"
+        combined_context += context_frame
+    extractions = call_extraction_model(transcript, args.model, combined_context)
 
     # Display
     print("Extracted:")

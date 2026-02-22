@@ -39,6 +39,7 @@ from extract import (
     save_session_offset,
     _load_session_offsets,
     detect_session_domain,
+    _parse_tool_error_sequences,
 )
 
 # --- Config ---
@@ -63,8 +64,21 @@ IMPORTANT DISTINCTIONS:
 - NOT ARTIFACTS (skip these): Casual discussion, code snippets (already in git), daily standup dashboards (ephemeral), simple Q&A, tool output, error messages, status updates
 - EPHEMERAL (skip these): Capacity snapshots, daily schedules, meeting agendas — these go stale within days
 
+COMMITMENT UPDATES (extract these when CONTEXT FRAME is present):
+When conversations discuss scheduling, progress, or emotional friction related to ACTIVE COMMITMENTS listed in the context frame, extract a "commitment_update" artifact. These track changes to tracked commitments that would otherwise be lost when the session ends.
+
+Examples of commitment updates:
+- "MBA work moved from Thursday to Tuesday" → commitment_update (reschedule)
+- "Difficulty committing to MBA group project, keep postponing" → commitment_update (friction)
+- "MBA group presentation is done, submitted" → commitment_update (completion)
+- "Made progress on Stripe Connect — payment flow works in staging" → commitment_update (progress)
+
+For commitment_update artifacts, include these extra fields:
+- "commitment_target": the Konban task title this relates to (fuzzy match OK)
+- "update_type": "reschedule" | "progress" | "friction" | "completion"
+
 For each artifact found, assess:
-1. TYPE: plan | analysis | framework | decision | roadmap | error_pattern
+1. TYPE: plan | analysis | framework | decision | roadmap | error_pattern | commitment_update
 2. VALUE: very_high (strategic, multi-paragraph, decision-bearing) | medium (useful reference) | low (nice-to-have)
 3. PERSISTENCE CHECK: Look for signals that it was already saved:
    - Tool calls to notion-api.py, konban, Brain, MEMORY.md in subsequent messages
@@ -80,6 +94,9 @@ CRITICAL — CONTENT REPRODUCTION RULES:
 - For "partial" persistence: focus on what was NOT saved. The Brain/Konban already has the summary — reproduce the reasoning, data, and nuance that was lost.
 
 Also identify ERROR PATTERNS: places where the assistant used a tool incorrectly, got an error, and had to retry. These are skill improvement signals.
+
+IMPORTANT — TOOL ERROR DATA:
+If a <tool_errors> section is included below the transcript, it contains STRUCTURED error sequences extracted directly from tool_use/tool_result blocks (the transcript text may not show these). Use this data to produce more precise error_patterns. Each entry shows the failed command, error output, and (if available) the successful retry command.
 
 If the transcript contains a section marked "[--- CONTEXT FROM PREVIOUS EXTRACTION ---]", that section is already processed. Only extract artifacts from the "[--- NEW MESSAGES BELOW ---]" section. Use the context section only for understanding references in the new messages.
 
@@ -99,15 +116,27 @@ Return ONLY valid JSON:
   ],
   "error_patterns": [
     {
+      "skill": "konban",
+      "script": "notion-api.py",
       "tool": "konban",
       "command": "create --description",
+      "error_type": "missing_flag | wrong_arg_type | invalid_value | case_sensitivity | other",
       "error_summary": "Flag not supported",
+      "correct_usage": "Use create + log instead (create does not accept --description)",
       "resolution": "Used create + log instead",
-      "suggested_fix": "Add --description to create command or document limitation"
+      "suggested_fix": "Add --description to create command or document limitation",
+      "doc_gap": true
     }
   ],
   "session_summary": "1-2 sentence summary of the overall session"
 }
+
+For error_patterns:
+- "skill": the skill directory name (e.g., "konban", "linear", "gcal")
+- "script": the helper script filename (e.g., "notion-api.py", "linear-api.py")
+- "error_type": classify the error — wrong_arg_type (e.g., string where int expected), invalid_value (e.g., "High" when "3" needed), case_sensitivity (e.g., "feature" vs "Feature"), missing_flag (flag doesn't exist), other
+- "correct_usage": the CORRECT way to invoke the command (from the successful retry or your analysis)
+- "doc_gap": true if this error is likely because the SKILL.md documentation is missing or unclear about this constraint. false if the info is probably already documented and Claude just ignored it.
 
 If no artifacts or error patterns found, return empty arrays. Do NOT hallucinate artifacts that aren't in the transcript."""
 
@@ -142,17 +171,34 @@ def _set_artifact_offset(session_path: str, offset: int):
 
 # --- Model call ---
 
-def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL) -> dict:
+def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL,
+                          context_frame: str = "", tool_errors: list = None) -> dict:
     """Call GLM-5 via OpenRouter to extract artifacts."""
     api_key = get_api_key()
 
-    # Wrap transcript in XML tags so the model doesn't confuse it with conversation
-    user_content = (
+    # Build user content with optional context frame and tool errors
+    parts = []
+    if context_frame:
+        parts.append(
+            "The following CONTEXT FRAME shows the user's active commitments and priorities. "
+            "Use it to identify commitment_update artifacts.\n\n"
+            f"<context_frame>\n{context_frame}\n</context_frame>\n\n"
+        )
+    if tool_errors:
+        errors_text = json.dumps(tool_errors, indent=2)
+        parts.append(
+            "The following TOOL ERRORS were extracted from actual tool_use/tool_result blocks "
+            "in the session. These show exact commands that failed and (when available) the "
+            "successful retry. Use these to produce precise error_patterns.\n\n"
+            f"<tool_errors>\n{errors_text}\n</tool_errors>\n\n"
+        )
+    parts.append(
         "Extract artifacts from the following transcript. "
         "The transcript is wrapped in <transcript> tags — analyze it, do NOT continue it.\n\n"
         f"<transcript>\n{transcript}\n</transcript>\n\n"
         "Now return ONLY valid JSON with your extraction results."
     )
+    user_content = "".join(parts)
 
     payload = json.dumps({
         "model": model,
@@ -350,12 +396,23 @@ def main():
         transcript = transcript[-60000:]
 
     domain = detect_session_domain(session_path)
+
+    # Load dynamic context frame (active commitments, priorities)
+    context_frame = ""
+    try:
+        from context_frame import load_context_frame
+        context_frame = load_context_frame()
+        if context_frame:
+            print(f"Context frame: {len(context_frame)} chars")
+    except ImportError:
+        pass  # Graceful degradation
+
     print(f"Extracting artifacts from {len(transcript)} chars...")
     print(f"Model: {args.model} | Domain: {domain or 'unknown'}")
     print()
 
-    # Call model
-    result = call_extraction_model(transcript, args.model)
+    # Call model with context frame
+    result = call_extraction_model(transcript, args.model, context_frame)
 
     artifacts = result.get("artifacts", [])
     errors = result.get("error_patterns", [])
@@ -387,9 +444,11 @@ def main():
         return
 
     # Filter to actionable artifacts (medium+ value, not already persisted)
+    # commitment_update artifacts are always actionable (they update tracked state)
     actionable = [a for a in artifacts
-                  if a.get("value") in ("very_high", "medium")
-                  and a.get("persistence_status") != "persisted"]
+                  if (a.get("value") in ("very_high", "medium")
+                      and a.get("persistence_status") != "persisted")
+                  or a.get("type") == "commitment_update"]
 
     # Error patterns are always actionable (they're skill improvement signals)
     error_artifacts = [{"type": "error_pattern", **e} for e in errors]

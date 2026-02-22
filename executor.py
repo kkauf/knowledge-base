@@ -43,6 +43,7 @@ BRAIN_SCRIPT = Path.home() / ".claude" / "skills" / "notion-docs" / "notion-api.
 ALLOWED_ACTIONS = {
     "create_konban_task",   # Create new task (pending, tagged [daemon])
     "log_konban_task",      # Append log entry to existing task
+    "update_konban_task",   # Update task metadata (title, due date) — Tier 1
     "create_brain_doc",     # Create new Brain doc under a section
     "enrich_brain_doc",     # Append new section to existing Brain doc (additive only)
     "done_konban_task",     # Mark task done (high-confidence only, Tier 1)
@@ -127,6 +128,13 @@ def check_permission(action: dict) -> tuple[bool, str]:
             return False, "DENIED: enrich_brain_doc requires content"
         if not action.get("section_name"):
             return False, "DENIED: enrich_brain_doc requires section_name (heading for the new section)"
+
+    if action_type == "update_konban_task":
+        if not action.get("task_id") and not action.get("target"):
+            return False, "DENIED: update_konban_task requires task_id or target"
+        # Must have at least one field to update
+        if not any(action.get(f) for f in ("new_name", "new_due", "new_priority", "new_timebox")):
+            return False, "DENIED: update_konban_task requires at least one update field (new_name, new_due, new_priority, new_timebox)"
 
     if action_type == "done_konban_task":
         if not action.get("task_id") and not action.get("target"):
@@ -277,6 +285,65 @@ def execute_done_konban_task(action: dict, dry_run: bool) -> dict:
     return result
 
 
+def execute_update_konban_task(action: dict, dry_run: bool) -> dict:
+    """Update a Konban task's metadata (title, due date, priority, timebox)."""
+    task_id = action.get("task_id", "")
+    target = action.get("target", "")
+    source = action.get("source_artifact", "unknown")
+
+    # Resolve task_id from target name if needed
+    if not task_id and target:
+        if dry_run:
+            return {"status": "dry_run", "note": f"Would search for '{target}' then update"}
+
+        import re
+        search_code, search_out, _ = run_command(
+            ["python3", str(KONBAN_SCRIPT), "search", target]
+        )
+        if search_code != 0 or "No active tasks" in search_out:
+            return {"status": "skipped", "reason": f"Task not found: {target}"}
+
+        id_matches = re.findall(r'\[([0-9a-f-]{36})\]', search_out)
+        if not id_matches:
+            return {"status": "skipped", "reason": f"No matching task for: {target}"}
+        task_id = id_matches[0]
+
+    if not task_id:
+        return {"status": "failed", "reason": "No task_id or target provided"}
+
+    # Build update command
+    cmd = ["python3", str(KONBAN_SCRIPT), "update", task_id]
+    updates = []
+    if action.get("new_name"):
+        cmd.extend(["--name", action["new_name"]])
+        updates.append(f"name → {action['new_name']}")
+    if action.get("new_due"):
+        cmd.extend(["--due", action["new_due"]])
+        updates.append(f"due → {action['new_due']}")
+    if action.get("new_priority"):
+        cmd.extend(["--priority", action["new_priority"]])
+        updates.append(f"priority → {action['new_priority']}")
+    if action.get("new_timebox"):
+        cmd.extend(["--timebox", action["new_timebox"]])
+        updates.append(f"timebox → {action['new_timebox']}")
+
+    if dry_run:
+        return {"status": "dry_run", "command": " ".join(cmd), "updates": updates}
+
+    # Log the update reason before applying
+    log_msg = f"[daemon] Updated: {', '.join(updates)}\nSource: {source}"
+    run_command(["python3", str(KONBAN_SCRIPT), "log", task_id, log_msg])
+
+    exit_code, stdout, stderr = run_command(cmd)
+    result = {"status": "success" if exit_code == 0 else "failed",
+              "exit_code": exit_code, "updates": updates}
+    if stdout:
+        result["output"] = stdout
+    if stderr:
+        result["error"] = stderr
+    return result
+
+
 def execute_create_brain_doc(action: dict, dry_run: bool) -> dict:
     """Create a Brain doc under the appropriate section."""
     title = action.get("title") or action.get("target", "Untitled")
@@ -419,6 +486,7 @@ def execute_fix_skill(action: dict, dry_run: bool) -> dict:
 EXECUTORS = {
     "create_konban_task": execute_create_konban_task,
     "log_konban_task": execute_log_konban_task,
+    "update_konban_task": execute_update_konban_task,
     "done_konban_task": execute_done_konban_task,
     "create_brain_doc": execute_create_brain_doc,
     "enrich_brain_doc": execute_enrich_brain_doc,
