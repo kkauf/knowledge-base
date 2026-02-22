@@ -374,11 +374,14 @@ The Brain has a hierarchical structure with typed sections. The daemon routes do
 18. ~~**Split reconciliation output**~~ Done: Review summary now has two sections: **DONE** (auto-executed, spot-check) and **YOUR CALL** (deferred proposals, approve/dismiss). Deferred actions saved to `~/.claude/knowledge/standup-proposals.json`.
 19. ~~**Add Brain index to reconciliation context**~~ Done: `load_brain_index()` loads `notion-api.py index` output alongside Active Context, Konban, and KB decisions. Enables accurate enrich-vs-create decisions.
 
+20. ~~**Add git commit history as data source**~~ Done: `load_git_history(days=7)` scans kaufmann-health and knowledge-base repos. Git commits are the strongest "done" signal — more reliable than conversation language. Reconciler uses `Ship:` prefix for explicit deployment, `feat()` commits for features shipped.
+21. ~~**State consistency check**~~ Done: Proactive comparison of Active Context priorities and Konban tasks against git commits. Runs on every pipeline invocation (even with no pending artifacts). Uses semantic matching with German synonym support. Flags both fully completed and partially completed items. Stale findings merge into action plan as conflicts for standup review.
+
 ### Phase 3: Standup integration (planned)
 
-20. **Interactive approval at standup** — Standup Claude reads Tier 2 proposals and presents as batch yes/no decisions. Executes approved actions in-session.
-21. **Rollback capability** — `pipeline.py --rollback <action-id>` undoes a specific auto-executed action using audit log's "previous value" field.
-22. **Feedback loop** — Log rejections of Tier 2 proposals. Over time, tune confidence thresholds based on rejection rate.
+22. **Interactive approval at standup** — Standup Claude reads Tier 2 proposals and presents as batch yes/no decisions. Executes approved actions in-session.
+23. **Rollback capability** — `pipeline.py --rollback <action-id>` undoes a specific auto-executed action using audit log's "previous value" field.
+24. **Feedback loop** — Log rejections of Tier 2 proposals. Over time, tune confidence thresholds based on rejection rate.
 
 ## Research Patterns (from CogCanvas, memU, Mem0)
 
