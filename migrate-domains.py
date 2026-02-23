@@ -10,33 +10,21 @@ Usage:
 """
 
 import sqlite3
-import os
 import sys
 from collections import defaultdict
 
-DB_PATH = os.path.expanduser("~/.claude/knowledge/knowledge.db")
+from config import get_db_path, get_domains, detect_domain
 
-# Same domain rules as briefing.py
-DOMAIN_RULES = [
-    ("KH", ["kaufmann-health", "kaufmann/health", "kaufmann%health"]),
-    ("Personal", ["Personal-Support", "Personal/Support", "cornell", "email-katherine"]),
-    ("VSS", ["vss"]),
-    ("IsAI", ["IsAIConsciousYet", "isai"]),
-    ("Infrastructure", ["claude-sessions", "knowledge-base", "kkauf"]),
-]
-
-
-def detect_domain(source: str) -> str:
-    source_lower = source.lower()
-    for domain, patterns in DOMAIN_RULES:
-        for pat in patterns:
-            if pat.lower() in source_lower:
-                return domain
-    return "Other"
+DB_PATH = str(get_db_path())
 
 
 def main():
     dry_run = "--dry" in sys.argv
+
+    domains = get_domains()
+    if not domains:
+        print("Error: No domains configured. Add domains to config.json first.", file=sys.stderr)
+        sys.exit(2)
 
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
@@ -51,7 +39,7 @@ def main():
         JOIN entities e ON f.entity_id = e.id
         WHERE f.source IS NOT NULL
     """):
-        domain = detect_domain(row['source'])
+        domain = detect_domain(row['source']) or "Other"
         entity_domains[row['entity_id']][domain] += 1
         entity_names[row['entity_id']] = row['name']
 
@@ -64,11 +52,11 @@ def main():
     if dry_run:
         print("DRY RUN — no changes will be made\n")
 
-    for entity_id, domains in sorted(entity_domains.items(), key=lambda x: entity_names.get(x[0], '')):
-        total_facts = sum(domains.values())
+    for entity_id, doms in sorted(entity_domains.items(), key=lambda x: entity_names.get(x[0], '')):
+        total_facts = sum(doms.values())
         name = entity_names.get(entity_id, entity_id)
 
-        for domain, count in domains.items():
+        for domain, count in doms.items():
             confidence = round(count / total_facts, 2) if total_facts > 0 else 0.5
 
             if dry_run:

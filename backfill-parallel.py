@@ -24,9 +24,11 @@ sys.path.insert(0, str(script_dir))
 import extract
 import briefing
 
-SESSIONS_DIR = Path.home() / ".claude" / "projects"
-MIN_SIZE = 10_000
-LOG_PATH = Path.home() / ".claude" / "knowledge" / "backfill.log"
+from config import get_sessions_dir, get_backfill_log, cfg, get_username_path_segment
+
+SESSIONS_DIR = get_sessions_dir()
+MIN_SIZE = cfg("backfill_min_session_size", 10000)
+LOG_PATH = get_backfill_log()
 
 
 def log(msg: str):
@@ -67,7 +69,7 @@ def get_project_name(path: Path) -> str:
     parts = path.parts
     for i, p in enumerate(parts):
         if p == "projects" and i + 1 < len(parts):
-            proj = parts[i + 1].lstrip('-').replace('-Users-kkaufmann-', '').replace('-', '/')
+            proj = parts[i + 1].lstrip('-').replace(get_username_path_segment(), '').replace('-', '/')
             return proj
     return "unknown"
 

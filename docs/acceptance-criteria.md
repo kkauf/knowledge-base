@@ -2,7 +2,7 @@
 
 ## AC-1: Database schema supports temporal facts
 
-- [ ] SQLite database at `~/.claude/knowledge/knowledge.db`
+- [ ] SQLite database at `~/.knowledge-base/knowledge.db`
 - [ ] Entities table: id, name, type, created_at, updated_at
 - [ ] Facts table: id, entity_id, attribute, value, source, valid_from, valid_to, superseded_by, created_at
 - [ ] Relations table: id, from_entity_id, relation_type, to_entity_id, valid_from, valid_to, created_at
@@ -11,8 +11,8 @@
 
 ## AC-2: CLI query tool returns current facts
 
-- [ ] `kb.py query "marta"` returns all current (valid_to IS NULL) facts about Marta
-- [ ] `kb.py query "marta" --history` includes superseded facts
+- [ ] `kb.py query "alice"` returns all current (valid_to IS NULL) facts about Alice
+- [ ] `kb.py query "alice" --history` includes superseded facts
 - [ ] `kb.py search "QA"` searches across entity names, fact values, and decision titles
 - [ ] `kb.py decisions` lists active decisions
 - [ ] `kb.py decisions --all` includes superseded/reversed decisions
@@ -33,7 +33,7 @@
 
 ## AC-4: BRIEF.md is accurate and concise
 
-- [ ] `briefing.py` generates `~/.claude/knowledge/BRIEF.md`
+- [ ] `briefing.py` generates `~/.knowledge-base/BRIEF.md`
 - [ ] Contains current-state facts only (valid_to IS NULL)
 - [ ] Grouped by entity, sorted by recency
 - [ ] Active decisions listed with rationale
@@ -43,20 +43,20 @@
 ## AC-5: Setup and integration
 
 - [ ] `setup.sh` is idempotent (safe to run multiple times)
-- [ ] Creates `~/.claude/knowledge/` directory
+- [ ] Creates `~/.knowledge-base/` directory
 - [ ] Creates SQLite DB with schema
-- [ ] Symlinks `kb.py`, `extract.py`, `briefing.py` into `~/.claude/knowledge/`
+- [ ] Symlinks `kb.py`, `extract.py`, `briefing.py` into `~/.knowledge-base/`
 - [ ] Instructions in README for adding to CLAUDE.md
 
-## AC-6: The "Marta quit" test
+## AC-6: The "Alice left" test
 
 End-to-end validation using the motivating example:
-- [ ] Seed DB with: Entity "Marta Sapor" (person), Fact "role = QA Tester" (valid_from Jan 17)
-- [ ] Run extraction on a transcript containing "Marta quit"
+- [ ] Seed DB with: Entity "Alice Smith" (person), Fact "role = QA Tester" (valid_from Jan 17)
+- [ ] Run extraction on a transcript containing "Alice left"
 - [ ] Verify: old role fact gets valid_to stamped, new status fact created
-- [ ] Verify: BRIEF.md shows "Marta Sapor — former QA Tester, left"
-- [ ] Verify: `kb.py query "marta"` shows current state
-- [ ] Verify: `kb.py query "marta" --history` shows both states
+- [ ] Verify: BRIEF.md shows "Alice Smith — former QA Tester, left"
+- [ ] Verify: `kb.py query "alice"` shows current state
+- [ ] Verify: `kb.py query "alice" --history` shows both states
 
 ## Out of scope for MVP
 

@@ -36,19 +36,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from extract import get_api_key
+from config import (get_openrouter_url, get_reconciliation_model, get_kb_dir,
+                    get_pending_file, get_konban_script, get_brain_script,
+                    get_skills_dir, get_api_key, get_http_referer, get_git_repos)
 
 # --- Config ---
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "z-ai/glm-5"
-KB_DIR = Path.home() / ".claude" / "knowledge"
-PENDING_FILE = KB_DIR / "artifacts-pending.json"
+OPENROUTER_URL = get_openrouter_url()
+DEFAULT_MODEL = get_reconciliation_model()
+KB_DIR = get_kb_dir()
+PENDING_FILE = get_pending_file()
 
-KONBAN_SCRIPT = Path.home() / ".claude" / "skills" / "konban" / "notion-api.py"
-BRAIN_SCRIPT = Path.home() / ".claude" / "skills" / "notion-docs" / "notion-api.py"
-KB_SCRIPT = KB_DIR / "kb.py"
-SKILLS_DIR = Path.home() / ".claude" / "skills"
+KONBAN_SCRIPT = get_konban_script()
+BRAIN_SCRIPT = get_brain_script()
+KB_SCRIPT = get_kb_dir() / "kb.py"
+SKILLS_DIR = get_skills_dir()
 
 # --- Reconciliation Prompt ---
 
@@ -77,7 +79,7 @@ RULES:
 
 ENRICHMENT vs CREATION decision:
 - CHECK THE BRAIN DOCUMENT INDEX before proposing create_brain_doc. If any existing doc covers the same topic or entity, use enrich_brain_doc instead.
-- Fuzzy match on topic: "Research: Carlotta Interview Implications" covers the same topic as an artifact titled "What the Carlotta Interview Tells You About the SaaS Product" — these are the SAME topic. Use enrich, not create.
+- Fuzzy match on topic: "Research: User Interview Implications" covers the same topic as an artifact titled "What the User Interview Tells You About the SaaS Product" — these are the SAME topic. Use enrich, not create.
 - If the artifact is a genuinely new TOPIC not covered by any existing doc, use create_brain_doc.
 - Enrichment is additive only — it appends a new section, never modifies existing content.
 - When enriching, choose a section_name that describes what's being added (e.g., "SaaS Product Implications", "Pre-Booking Gap Analysis").
@@ -102,7 +104,7 @@ The Brain has 5 sections. Every Brain doc MUST include a "section" field:
 - "Research" — external research, market analysis, legal analysis, user interview analysis, competitive research
 - "Archive" — never create here (only for manually moving superseded content)
 
-For Research section docs, prefix the title with "Research: " (e.g., "Research: Carlotta Interview Implications").
+For Research section docs, prefix the title with "Research: " (e.g., "Research: User Interview Implications").
 
 ARTIFACT DECOMPOSITION (critical — you MUST do this):
 Many artifacts contain BOTH reference material (analysis, reasoning) AND actionable recommendations (to-dos, next steps). You MUST decompose these into SEPARATE actions. A Brain doc with recommendations sitting inside it is an anti-pattern — recommendations need to become Konban tasks.
@@ -116,7 +118,7 @@ SCAN every artifact for actionable items. Look for:
 When you find actionable items:
 1. Create the Brain doc (or enrich existing doc) for the analysis — this is the "why"
 2. Create a SEPARATE create_konban_task for EACH actionable item — this is the "what"
-3. Give all actions from the same artifact the same "artifact_group" value (lowercase-kebab-case, e.g. "carlotta-interview")
+3. Give all actions from the same artifact the same "artifact_group" value (lowercase-kebab-case, e.g. "user-interview")
 4. On each Konban task, set "brain_doc" to the Brain doc title
 
 DO NOT skip this step. If an artifact has 3 recommendations, you MUST produce 3 create_konban_task actions (minus any that already exist in Konban or are marked done).
@@ -185,13 +187,13 @@ Return ONLY valid JSON:
       "type": "create_konban_task | log_konban_task | done_konban_task | update_konban_task | create_brain_doc | enrich_brain_doc | fix_skill | no_action",
       "title": "task or doc title (for create actions)",
       "target": "existing doc or task name (for enrich/log actions)",
-      "section_name": "heading for the new section (for enrich_brain_doc only, e.g. 'Carlotta Interview Findings')",
+      "section_name": "heading for the new section (for enrich_brain_doc only, e.g. 'User Interview Findings')",
       "priority": "High | Medium | Low (for create_konban_task only)",
       "content": "FULL content for brain docs (verbatim from artifact) or summary for log entries",
       "section": "Strategy | Operations | Product | Research (for create_brain_doc only)",
       "domain": "metadata domain tag (e.g. Product, Research, Strategy, Operational)",
       "source_artifact": "artifact title this action comes from",
-      "artifact_group": "shared ID linking actions from the same artifact (e.g. 'carlotta-interview')",
+      "artifact_group": "shared ID linking actions from the same artifact (e.g. 'user-interview')",
       "brain_doc": "title of the Brain doc this task relates to (for create_konban_task from decomposition)",
       "confidence": "high | medium | low (REQUIRED — see confidence scoring rules)",
       "rationale": "why this action (include staleness assessment and confidence justification)",
@@ -228,7 +230,7 @@ def run_cmd(args: list[str], timeout: int = 30) -> str:
 
 def load_konban_state() -> str:
     """Load current Konban board state."""
-    if not KONBAN_SCRIPT.exists():
+    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
         return "[Konban board unavailable]"
     output = run_cmd(["python3", str(KONBAN_SCRIPT), "board"], timeout=30)
     return output or "[Konban board empty or unavailable]"
@@ -236,7 +238,7 @@ def load_konban_state() -> str:
 
 def load_brain_active_context() -> str:
     """Load Active Context from Brain."""
-    if not BRAIN_SCRIPT.exists():
+    if not BRAIN_SCRIPT or not BRAIN_SCRIPT.exists():
         return "[Brain unavailable]"
     output = run_cmd(["python3", str(BRAIN_SCRIPT), "read", "Active Context", "--raw"], timeout=30)
     return output or "[Active Context unavailable]"
@@ -254,10 +256,7 @@ def load_recent_decisions() -> str:
     return output or "[No recent decisions]"
 
 
-GIT_REPOS = [
-    Path.home() / "github" / "kaufmann-health",
-    Path.home() / "github" / "knowledge-base",
-]
+GIT_REPOS = get_git_repos()
 
 
 def load_git_history(days: int = 7) -> str:
@@ -281,7 +280,7 @@ def load_git_history(days: int = 7) -> str:
 
 def load_brain_index() -> str:
     """Load Brain doc index (all docs across sections)."""
-    if not BRAIN_SCRIPT.exists():
+    if not BRAIN_SCRIPT or not BRAIN_SCRIPT.exists():
         return "[Brain unavailable]"
     output = run_cmd(["python3", str(BRAIN_SCRIPT), "index"], timeout=30)
     return output or "[Brain index unavailable]"
@@ -364,7 +363,7 @@ def load_system_state(artifacts: list = None) -> str:
     state = f"""## Current Konban Board (active tasks)
 {konban}
 
-## Active Context (KH Brain)
+## Active Context (Brain)
 {brain}
 
 ## Brain Document Index (all existing docs by section)
@@ -396,7 +395,7 @@ PROCEDURE — follow these steps:
 
 MATCHING RULES:
 - Match SEMANTICALLY, not just by keyword. "increase character limits ~3x" matches "increase profile char limits"
-- "Werdegang" = "Mein Weg zu dieser Arbeit" (same field, German synonyms)
+- Match across languages/abbreviations. E.g., "About Me" = "Bio section" (same concept, different labels)
 - feat() commits = feature shipped. fix() commits for the same area = iterative work on that feature.
 - Multiple commits touching the same feature area = strong signal the work is done
 - A commit prefixed with "Ship:" means explicit production deployment
@@ -407,14 +406,14 @@ WHAT TO FLAG:
 - Konban tasks in "Doing" or "To Do" where the work is visible in commits
 
 EXAMPLE MATCH:
-  Active Context says: "Profile depth — increase profile char limits + add Werdegang field"
-  Git shows: "e56fd42 feat(profile): increase character limits ~3x and add 'Mein Weg zu dieser Arbeit' field"
-  → This is a MATCH. "Mein Weg zu dieser Arbeit" IS the Werdegang field. Flag it.
+  Active Context says: "Profile depth — increase profile char limits + add Bio section"
+  Git shows: "e56fd42 feat(profile): increase character limits ~3x and add 'About Me' field"
+  → This is a MATCH. "About Me" IS the Bio section. Flag it.
 
 EXAMPLE NON-MATCH:
-  Active Context says: "Passwordless patient accounts (EARTH-292)"
-  Git shows: "fix(portal): default to Profile tab for new therapists"
-  → NOT a match. The commit is about therapist portal, not patient accounts.
+  Active Context says: "Passwordless user accounts (PROJ-292)"
+  Git shows: "fix(portal): default to Profile tab for new users"
+  → NOT a match. The commit is about the portal profile tab, not passwordless accounts.
 
 Return ONLY valid JSON:
 {
@@ -462,7 +461,7 @@ def call_state_consistency_check(system_state: str, model: str = DEFAULT_MODEL) 
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com/kkaufmann/knowledge-base",
+            **({"HTTP-Referer": get_http_referer()} if get_http_referer() else {}),
             "X-Title": "KB State Consistency",
         },
     )
@@ -523,7 +522,7 @@ def call_reconciliation_model(artifacts_json: str, system_state: str, model: str
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com/kkaufmann/knowledge-base",
+            **({"HTTP-Referer": get_http_referer()} if get_http_referer() else {}),
             "X-Title": "KB Reconciliation",
         },
     )

@@ -8,14 +8,14 @@
             "artifacts": [
               {
                 "type": "analysis",
-                "title": "SaaS Product Strategic Analysis from Carlotta Interview",
+                "title": "SaaS Product Strategic Analysis from User A Interview",
                 "summary": "Comprehensive analysis revealing that profile depth is the load-bearing wall of the SaaS revenue model, identifying pre-booking OFFLINE_GAP (users google therapists before booking) as a critical funnel leak not addressed by current roadmap sequencing.",
                 "value": "very_high",
                 "persistence_status": "partial",
                 "persistence_evidence": "Roadmap updated in Notion Brain via task b76deb1; Active Context updated. However, the full strategic analysis document with confidence levels, sequencing problem framing, and Audi/Mazda principle was delivered in conversation but not explicitly saved as a standalone strategic doc.",
-                "content_excerpt": "The SaaS strategy doc says 'One click to be a therapist' \u2014 replace the entire tool stack. But the Carlotta interview says the surface is the pipe. The surface IS the conversion mechanism. She saw 3 therapists, none matched her method, the profiles were too thin to form a 'Gef\u00fchl', and her instinct was to leave and google them. That's the OFFLINE_GAP starting at the directory, not at the booking. Profile depth isn't a polish item \u2014 it's the load-bearing wall of the SaaS revenue model.",
+                "content_excerpt": "The SaaS strategy doc says 'One click to be a therapist' \u2014 replace the entire tool stack. But the User A interview says the surface is the pipe. The surface IS the conversion mechanism. She saw 3 therapists, none matched her method, the profiles were too thin to form a 'Gef\u00fchl', and her instinct was to leave and google them. That's the OFFLINE_GAP starting at the directory, not at the booking. Profile depth isn't a polish item \u2014 it's the load-bearing wall of the SaaS revenue model.",
                 "entities_referenced": [
-                  "Carlotta interview",
+                  "User A interview",
                   "SaaS strategy",
                   "OFFLINE_GAP",
                   "Roadmap",
@@ -26,17 +26,17 @@
               {
                 "type": "framework",
                 "title": "Testing Strategy Framework - Integration vs Mocks",
-                "summary": "Framework explaining why mocks failed to catch EARTH-294 bugs, with test layer mapping table and the principle that integration code must be tested against real external systems.",
+                "summary": "Framework explaining why mocks failed to catch PROJ-294 bugs, with test layer mapping table and the principle that integration code must be tested against real external systems.",
                 "value": "medium",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Integration testing rules added to CLAUDE.md (committed to main); meta-learning recorded in MEMORY.md; testing guide created at docs/private/cal-multiformat-testing-guide.md",
-                "content_excerpt": "The gap is structural, not a coverage oversight. The existing tests are unit/API tests that mock Supabase. The 4 bugs lived in upgradeSchedule.ts which talks directly to Cal.com's Railway PostgreSQL via raw SQL. They were integration bugs. None of these are testable with mocks. A mock would encode your assumptions \u2014 the same assumptions that were wrong. For integration code that talks to external systems, test against the real system.",
+                "content_excerpt": "The gap is structural, not a coverage oversight. The existing tests are unit/API tests that mock Supabase. The 4 bugs lived in upgradeSchedule.ts which talks directly to BookingTool's Railway PostgreSQL via raw SQL. They were integration bugs. None of these are testable with mocks. A mock would encode your assumptions \u2014 the same assumptions that were wrong. For integration code that talks to external systems, test against the real system.",
                 "entities_referenced": [
-                  "EARTH-294",
+                  "PROJ-294",
                   "CLAUDE.md",
                   "MEMORY.md",
                   "test-cal-multiformat.ts",
-                  "Cal.com"
+                  "BookingTool"
                 ]
               },
               {
@@ -46,7 +46,7 @@
                 "value": "very_high",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Roadmap updated in Notion Brain via task b76deb1 (completed, exit code 0); Active Context v7.0 updated to reflect new priority sequence and mindset reminders",
-                "content_excerpt": "Roadmap (Brain) \u2014 new sequence: 1. Calendar Multi-Format \u2014 Completed (shipped Feb 20). 2. Profile Depth + Honest Match Framing \u2014 moved up from #6, expanded scope. Three workstreams: dev (char limits + Werdegang field), ops (Katherine pilots rich profiles), copy (honest 'no NARM in Berlin' framing). 6. Consultative Matching + Premium Flow \u2014 two-track: productize self-service + monetize Katherine's concierge.",
+                "content_excerpt": "Roadmap (Brain) \u2014 new sequence: 1. Calendar Multi-Format \u2014 Completed (shipped Feb 20). 2. Profile Depth + Honest Match Framing \u2014 moved up from #6, expanded scope. Three workstreams: dev (char limits + Werdegang field), ops (Bob pilots rich profiles), copy (honest 'no NARM in Berlin' framing). 6. Consultative Matching + Premium Flow \u2014 two-track: productize self-service + monetize Bob's concierge.",
                 "entities_referenced": [
                   "Notion Brain",
                   "Active Context",
@@ -58,7 +58,7 @@
               }
             ],
             "error_patterns": [],
-            "session_summary": "Session completed EARTH-294 bugfixes with 4 Cal.com integration bugs fixed and shipped, established integration testing principles to prevent similar issues, and produced strategic analysis from Carlotta interview that reprioritized the roadmap to address pre-booking OFFLINE_GAP through profile depth improvements.",
+            "session_summary": "Session completed PROJ-294 bugfixes with 4 BookingTool integration bugs fixed and shipped, established integration testing principles to prevent similar issues, and produced strategic analysis from User A interview that reprioritized the roadmap to address pre-booking OFFLINE_GAP through profile depth improvements.",
             "_meta": {
               "model": "qwen/qwen3.5-397b-a17b",
               "latency_s": 38.13,
@@ -102,13 +102,13 @@
                 "value": "medium",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Included in greenback-fbar-2025.md backup file in Taxes/2025 folder",
-                "content_excerpt": "Property: Wiesenstr. 7, 13357 Berlin (Whg.-Nr. 20053-2002901-02, 4.OG re). Vermieter: Katherine Elisabeth Evans Kaufmann und Konstantin Gregor Michael Kaufmann. Tenants: Ekaterina Strutsenko, Kristina Ochkina, Olga Bystrova. Rental start: 01.11.2023. Size: 114 m\u00b2, furnished. Purchase price: 295,000 EUR. Purchase date: 01/01/2012 (placeholder). Actively managed: No (Hausverwaltung SECON).",
+                "content_excerpt": "Property: Musterstr. 7, 13357 Berlin (Whg.-Nr. 00000-0000000-00, 4.OG re). Vermieter: Bob Evans Doe und Jane Doe. Tenants: Tenant A, Tenant B, Tenant C. Rental start: 01.11.2023. Size: 114 m\u00b2, furnished. Purchase price: 295,000 EUR. Purchase date: 01/01/2012 (placeholder). Actively managed: No (Hausverwaltung MGMT).",
                 "entities_referenced": [
                   "Berlin rental",
-                  "Wiesenstr. 7",
-                  "Hausverwaltung SECON",
-                  "Katherine Elisabeth Evans Kaufmann",
-                  "Konstantin Gregor Michael Kaufmann"
+                  "Musterstr. 7",
+                  "Hausverwaltung MGMT",
+                  "Bob Evans Doe",
+                  "Jane Doe"
                 ]
               }
             ],
@@ -138,30 +138,30 @@
             "artifacts": [
               {
                 "type": "analysis",
-                "title": "EUIPO Trademark Conflict Analysis - KAUFMANN HEALTH",
-                "summary": "Comprehensive eSearch conflict assessment showing zero exact matches for 'KAUFMANN HEALTH' and analysis of 7 partial 'KAUFMANN' marks in Classes 35/42/44, concluding no blocking conflicts exist.",
+                "title": "EUIPO Trademark Conflict Analysis - EXAMPLEORG",
+                "summary": "Comprehensive eSearch conflict assessment showing zero exact matches for 'EXAMPLEORG' and analysis of 7 partial marks in Classes 35/42/44, concluding no blocking conflicts exist.",
                 "value": "very_high",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Konban task 22ab2e4a-2d15-8007-9c55-d2d191df33fb updated with decision and next steps; user confirmed 'Update Konban' and assistant logged the analysis",
-                "content_excerpt": "Exact Match: 'KAUFMANN HEALTH' - 0 results. Completely clear. Partial Match: 'KAUFMANN' - 33 results, only ~7 active/registered with class overlap. SUSANNE KAUFMANN (Class 44, cosmetics) is the only mark worth watching but opposition risk is very low (~5%). All others in Classes 42/35 are unrelated industries (construction, architecture, law, fashion).",
+                "content_excerpt": "Exact Match: 'EXAMPLEORG' - 0 results. Completely clear. Partial Match: 'EXAMPLE' - 33 results, only ~7 active/registered with class overlap. SUSANNE EXAMPLE (Class 44, cosmetics) is the only mark worth watching but opposition risk is very low (~5%). All others in Classes 42/35 are unrelated industries (construction, architecture, law, fashion).",
                 "entities_referenced": [
-                  "Kaufmann Health",
-                  "Kaufmann Earth LLC",
+                  "ExampleOrg",
+                  "ExampleCo LLC",
                   "EUIPO",
-                  "KAUFMANN HEALTH"
+                  "EXAMPLEORG"
                 ]
               },
               {
                 "type": "decision",
                 "title": "Trademark Class Recommendation - Classes 35+42+44",
-                "summary": "Strategic decision to file EU trademark in all three classes (35, 42, 44) at EUR 1,050 total, with reasoning that Class 35 marketplace protection is essential for KH's business model and costs 6x more to add later.",
+                "summary": "Strategic decision to file EU trademark in all three classes (35, 42, 44) at EUR 1,050 total, with reasoning that Class 35 marketplace protection is essential for EO's business model and costs 6x more to add later.",
                 "value": "very_high",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Logged to Konban Markenschutz task; user confirmed 'I'll bite the bullet on 1050 EUR' and requested Konban update",
-                "content_excerpt": "Recommendation: File all 3 classes. EUR 1,050. Class 35 isn't optional - KH IS a marketplace (therapists list \u2192 patients find them \u2192 KH takes a cut). Adding Class 35 later = new application = EUR 900 minimum. Adding it now = EUR 150 extra. You'd be paying 6x more for the same protection by waiting.",
+                "content_excerpt": "Recommendation: File all 3 classes. EUR 1,050. Class 35 isn't optional - EO IS a marketplace (therapists list \u2192 patients find them \u2192 EO takes a cut). Adding Class 35 later = new application = EUR 900 minimum. Adding it now = EUR 150 extra. You'd be paying 6x more for the same protection by waiting.",
                 "entities_referenced": [
-                  "Kaufmann Health",
-                  "Kaufmann Earth",
+                  "ExampleOrg",
+                  "ExampleCo",
                   "EUIPO",
                   "Nice Classification"
                 ]
@@ -173,28 +173,28 @@
                 "value": "medium",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Assistant stated 'Konban updated' after presenting the cheat sheet; structured reference logged to task",
-                "content_excerpt": "Mark type: Word mark. Mark text: KAUFMANN HEALTH. Applicant: Kaufmann Earth LLC. Classes: 35 (Online marketplace services), 42 (SaaS/software), 44 (Healthcare services). Payment: EUR 1,050 due within 1 month. Language: English primary, German secondary.",
+                "content_excerpt": "Mark type: Word mark. Mark text: EXAMPLEORG. Applicant: ExampleCo LLC. Classes: 35 (Online marketplace services), 42 (SaaS/software), 44 (Healthcare services). Payment: EUR 1,050 due within 1 month. Language: English primary, German secondary.",
                 "entities_referenced": [
                   "EUIPO",
-                  "Kaufmann Earth LLC",
-                  "KAUFMANN HEALTH"
+                  "ExampleCo LLC",
+                  "EXAMPLEORG"
                 ]
               },
               {
                 "type": "plan",
                 "title": "QA Candidate Outreach & Triage Summary",
-                "summary": "Completion log for 4 Upwork QA candidates: Sameh/Zuhaib pending, Valentin dropped (low-effort response), Rav Rommel advanced to call stage with cal.com link sent.",
+                "summary": "Completion log for 4 Upwork QA candidates: Sameh/Zuhaib pending, Valentin dropped (low-effort response), Rav Rommel advanced to call stage with BookingTool link sent.",
                 "value": "medium",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Konban task 30cb2e4a-2d15-8135-beca-d71afff3ca5b updated to 'Pending Externally \u21ba' with full outreach log; assistant confirmed 'Konban updated'",
-                "content_excerpt": "All 4 candidates messaged. Valentin: 'ok, we can discuss cooperation' - dropped. Rav Rommel: answered all 3 questions, has Playwright, sent cal.com/kkauf/30min booking link. Sameh/Zuhaib: awaiting response. Timezone advantage: Philippines GMT+8 = async QA while user sleeps.",
+                "content_excerpt": "All 4 candidates messaged. Valentin: 'ok, we can discuss cooperation' - dropped. Rav Rommel: answered all 3 questions, has Playwright, sent BookingTool/jdoe/30min booking link. Sameh/Zuhaib: awaiting response. Timezone advantage: Philippines GMT+8 = async QA while user sleeps.",
                 "entities_referenced": [
                   "Valentin G.",
                   "Rav Rommel B.",
                   "Sameh M.",
                   "Zuhaib A.",
                   "Upwork",
-                  "Kaufmann Health"
+                  "ExampleOrg"
                 ]
               }
             ],
@@ -235,7 +235,7 @@
                 "suggested_fix": "Default to targeted JS extraction for large pages; document character limits"
               }
             ],
-            "session_summary": "Completed QA candidate outreach on Upwork (4 candidates messaged, Rav Rommel advanced to call stage, Valentin dropped). Conducted EUIPO eSearch conflict analysis for KAUFMANN HEALTH trademark - no blocking conflicts found. Recommended filing Classes 35+42+44 at EUR 1,050. Created blocking Konban task for Wise Business setup before payment. All updates logged to Konban.",
+            "session_summary": "Completed QA candidate outreach on Upwork (4 candidates messaged, Rav Rommel advanced to call stage, Valentin dropped). Conducted EUIPO eSearch conflict analysis for EXAMPLEORG trademark - no blocking conflicts found. Recommended filing Classes 35+42+44 at EUR 1,050. Created blocking Konban task for Wise Business setup before payment. All updates logged to Konban.",
             "_meta": {
               "model": "qwen/qwen3.5-397b-a17b",
               "latency_s": 25.51,
@@ -261,7 +261,7 @@
               {
                 "type": "analysis",
                 "title": "QA Candidate Comparison Matrix",
-                "summary": "Structured comparison of 4 QA engineer candidates across German fluency, automation skills, engagement level, and risk factors for Kaufmann Health hiring decision",
+                "summary": "Structured comparison of 4 QA engineer candidates across German fluency, automation skills, engagement level, and risk factors for ExampleOrg hiring decision",
                 "value": "medium",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Assistant confirmed 'Logged' to Konban QA task; Sameh identified as frontrunner and contact initiated",
@@ -271,20 +271,20 @@
                   "Rav Rommel Banaag",
                   "Zuhaib Ahmed",
                   "Valentin Gospodarchyk",
-                  "Kaufmann Health"
+                  "ExampleOrg"
                 ]
               },
               {
                 "type": "decision",
-                "title": "KAUFMANN HEALTH Trademark Filing Decision Record",
-                "summary": "Decision to file EUTM for KAUFMANN HEALTH (EUR 1,050), skip KAUFMANN EARTH trademark, and engage Pintz & Partners for EEA representative (EUR 170)",
+                "title": "EXAMPLEORG Trademark Filing Decision Record",
+                "summary": "Decision to file EUTM for EXAMPLEORG (EUR 1,050), skip EXAMPLECO trademark, and engage Pintz & Partners for EEA representative (EUR 170)",
                 "value": "very_high",
                 "persistence_status": "persisted",
                 "persistence_evidence": "Konban task updated with application #019320103, filing date Feb 20 2026, payment confirmed, status moved to 'Pending Externally'; email sent to Pintz & Partners",
-                "content_excerpt": "KAUFMANN HEALTH trademark filed: Application #019320103, Fast Track, EUR 1,050, Classes 35+42+44, filing date Feb 20 2026. Decision to skip KAUFMANN EARTH (separate EUR 1,050 filing, surname descriptiveness risk, back-office entity). Pintz & Partners (trademark.eu) engaged for EEA representation takeover at EUR 170. Total cost: ~EUR 1,220.",
+                "content_excerpt": "EXAMPLEORG trademark filed: Application #019320103, Fast Track, EUR 1,050, Classes 35+42+44, filing date Feb 20 2026. Decision to skip EXAMPLECO (separate EUR 1,050 filing, surname descriptiveness risk, back-office entity). Pintz & Partners (trademark.eu) engaged for EEA representation takeover at EUR 170. Total cost: ~EUR 1,220.",
                 "entities_referenced": [
-                  "KAUFMANN HEALTH",
-                  "Kaufmann Earth LLC",
+                  "EXAMPLEORG",
+                  "ExampleCo LLC",
                   "Pintz & Partners",
                   "EUIPO",
                   "trademark.eu"
@@ -322,7 +322,7 @@
                 "suggested_fix": "Add EEA representative requirement check to pre-filing checklist for non-EEA applicants; research representative options before reaching payment stage"
               }
             ],
-            "session_summary": "Session continued from previous conversation to complete QA candidate triage (Sameh selected, call scheduled) and execute KAUFMANN HEALTH trademark filing (EUR 1,050 paid, EEA representative engaged for EUR 170); Chrome extension connectivity issues required manual payment completion.",
+            "session_summary": "Session continued from previous conversation to complete QA candidate triage (Sameh selected, call scheduled) and execute EXAMPLEORG trademark filing (EUR 1,050 paid, EEA representative engaged for EUR 170); Chrome extension connectivity issues required manual payment completion.",
             "_meta": {
               "model": "qwen/qwen3.5-397b-a17b",
               "latency_s": 21.63,

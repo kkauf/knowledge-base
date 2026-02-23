@@ -4,7 +4,7 @@
 **Status:** Accepted (steps 1-4 implemented 2026-02-19, step 5 deferred)
 **Context:** After backfilling 215 sessions (915 entities, 1273 facts), two problems surfaced:
 1. BRIEF.md is 3,069 lines — unusable as passive context (target: ~50 lines)
-2. Entity duplication — same real-world entity gets multiple names ("KEARTH", "KH", "Kaufmann Health") because the extraction model has no context about what already exists
+2. Entity duplication — same real-world entity gets multiple names ("EXCO", "EO", "ExampleOrg") because the extraction model has no context about what already exists
 
 ## Decision
 
@@ -14,17 +14,17 @@ Entities belong to domains — clusters of related knowledge, like regions of th
 
 | Domain | Root entity | Examples |
 |--------|------------|---------|
-| Kaufmann Health | Kaufmann Health (company) | therapists, features, metrics, platform decisions |
-| Personal | Konstantin Kaufmann (person) | family, Oz, health, identity, AuDHD |
-| Consulting | Kaufmann Earth (company) | Rouven, Kerstin, proposals, client briefs |
+| ExampleOrg | ExampleOrg (company) | therapists, features, metrics, platform decisions |
+| Personal | Jane Doe (person) | family, Oz, health, identity, AuDHD |
+| Consulting | ExampleCo (company) | Client C, Client D, proposals, client briefs |
 | Infrastructure | — | tools, deployment, CI/CD, Claude skills |
 
-Entities can span multiple domains (Katherine: Personal + KH). Relations define the graph edges.
+Entities can span multiple domains (Bob: Personal + EO). Relations define the graph edges.
 
 **Domain detection:** Session project path → domain.
-- `kaufmann-health` → KH
-- `Personal-Support` → Personal
-- `kkauf` → Blog/Personal
+- `example-project` → EO
+- `personal-project` → Personal
+- `jdoe` → Blog/Personal
 - Default → infer from content
 
 **Implementation:** `entity_domains` junction table + domain detection from session source path.
@@ -43,8 +43,8 @@ This keeps prompt context focused (~100 entities, not 915) and eliminates name d
 **Prompt addition:**
 ```
 Known entities in this domain (reuse these names exactly):
-- Kaufmann Health (company) [booking_value=€125, primary_conversion=Lead Verified]
-- Cal.com (tool) [conversion_multiplier=5.5x, conversion_rate=2.03%]
+- ExampleOrg (company) [booking_value=€125, primary_conversion=Lead Verified]
+- BookingTool (tool) [conversion_multiplier=5.5x, conversion_rate=2.03%]
 ...
 
 If a fact updates an existing value, use the SAME entity name and attribute
@@ -61,19 +61,19 @@ BRIEF.md becomes an index, not a dump:
 ## Domains
 | Region | Entities | Latest change |
 |--------|----------|---------------|
-| Kaufmann Health | 142 | Cal 5.5x conversion (Feb 19) |
+| ExampleOrg | 142 | BookingTool 5.5x conversion (Feb 19) |
 | Personal | 34 | Oz sanctuary search (Feb 19) |
-| Consulting | 12 | Rouven proposal pending |
+| Consulting | 12 | Client C proposal pending |
 | Infrastructure | 45 | KB daemon live |
 
 ## Key Numbers
-Cal booking rate: 2.03% | Message: 0.37% | Multiplier: 5.5x
+BookingTool booking rate: 2.03% | Message: 0.37% | Multiplier: 5.5x
 ...
 
 ## Recent Decisions (7d)
 ...
 
-Deep lookup: kb.py query "entity" | kb.py domain "kh"
+Deep lookup: kb.py query "entity" | kb.py domain "eo"
 ```
 
 Target: ~50-80 lines. Points down, doesn't duplicate.

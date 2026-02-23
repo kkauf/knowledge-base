@@ -5,8 +5,8 @@
 - [x] CLI query tool (kb.py) — query, search, entities, assert, decide
 - [x] Extraction pipeline (extract.py) — OpenRouter + Qwen 3.5
 - [x] Briefing generator (briefing.py) — auto-generates BRIEF.md
-- [x] End-to-end test: "Marta quit" scenario
-- [x] End-to-end test: Katherine email extraction
+- [x] End-to-end test: "Alice left" scenario
+- [x] End-to-end test: Bob email extraction
 - [x] Wire BRIEF.md into CLAUDE.md as auto-loaded context
 - [x] Recall hook — entity name matching + SQLite lookup → system-reminder injection
 - [x] Per-session offset tracking (incremental extraction, no gaps)

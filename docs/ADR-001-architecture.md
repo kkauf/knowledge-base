@@ -15,7 +15,7 @@ Build a local, file-based knowledge management system using SQLite + auto-genera
 - **Local-first**: Runs on macOS without network dependency. Fast for personal scale (hundreds of facts, not millions).
 - **Queryable**: Full SQL, full-text search, temporal queries. Flat files (MEMORY.md) can't do this.
 - **Migratable**: Easy to export to Postgres or a hosted DB if this becomes a product later.
-- Notion was considered but rejected: adds API latency for every query, schema is too rigid (page/DB model doesn't fit a knowledge graph), and it's already overloaded with KH Brain + Konban.
+- Notion was considered but rejected: adds API latency for every query, schema is too rigid (page/DB model doesn't fit a knowledge graph), and it's already overloaded with EO Brain + Konban.
 
 ### Why no MCP server
 - MCP tool definitions consume 500-1000+ tokens of context window per server, loaded every session.
@@ -30,8 +30,8 @@ Build a local, file-based knowledge management system using SQLite + auto-genera
 - This is the only approach that's genuinely reliable for capture.
 
 ### Why temporal facts (not just latest state)
-- "Marta is QA tester" → "Marta quit" is a state transition, not a replacement.
-- History matters: "When did concierge matching get removed?" "What was Katherine's role before the Feb 2026 reorg?"
+- "Alice is QA tester" → "Alice left" is a state transition, not a replacement.
+- History matters: "When did Feature X get removed?" "What was Bob's role before the Feb 2026 reorg?"
 - Temporal validity (valid_from / valid_to) on facts enables both current-state queries and history queries.
 
 ## Alternatives Considered

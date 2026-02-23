@@ -10,13 +10,31 @@
 
 set -uo pipefail
 
-KB_DIR="$HOME/.claude/knowledge"
+# Resolve repo dir (follow symlink if this script was symlinked by setup.sh)
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -L "$0" ] && REPO_DIR="$(cd "$(dirname "$(readlink "$0")")" && pwd)"
+
+# Load all config values in one Python call
+eval "$(python3 -c "
+import sys; sys.path.insert(0, '$REPO_DIR')
+from config import get_kb_dir, get_sessions_dir, get_recall_script, cfg
+print(f'KB_DIR=\"{get_kb_dir()}\"')
+print(f'SESSIONS_DIR=\"{get_sessions_dir()}\"')
+r = get_recall_script()
+print(f'RECALL_SCRIPT=\"{r if r else ""}\"')
+print(f'MAX_PER_RUN={cfg(\"daemon_max_per_run\", 5)}')
+" 2>/dev/null)" || {
+    KB_DIR="$HOME/.knowledge-base"
+    SESSIONS_DIR="$HOME/.claude/projects"
+    RECALL_SCRIPT=""
+    MAX_PER_RUN=5
+}
+
 MARKER="$KB_DIR/.last-extraction"
 LOG="$KB_DIR/extraction.log"
-EXTRACT="$KB_DIR/extract.py"
-ARTIFACT_EXTRACT="$HOME/github/knowledge-base/artifact_extract.py"
-CONTEXT_FRAME="$HOME/github/knowledge-base/context_frame.py"
-MAX_PER_RUN=5  # Cap to avoid hammering the API on large backlogs
+EXTRACT="$REPO_DIR/extract.py"
+ARTIFACT_EXTRACT="$REPO_DIR/artifact_extract.py"
+CONTEXT_FRAME="$REPO_DIR/context_frame.py"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
@@ -36,7 +54,6 @@ else
 fi
 
 # Find session files modified since last run
-SESSIONS_DIR="$HOME/.claude/projects"
 if [ ! -d "$SESSIONS_DIR" ]; then
     log "No sessions directory found"
     exit 0
@@ -130,8 +147,7 @@ if [ "$LATEST_PROCESSED_TIME" -gt "$LAST_RUN" ]; then
 fi
 
 # Rebuild recall index if we processed anything
-if [ "$PROCESSED" -gt 0 ]; then
-    RECALL_SCRIPT="$HOME/.claude/scripts/kb-recall.py"
+if [ "$PROCESSED" -gt 0 ] && [ -n "$RECALL_SCRIPT" ]; then
     if [ -f "$RECALL_SCRIPT" ]; then
         if python3 "$RECALL_SCRIPT" --build-index >> "$LOG" 2>&1; then
             log "Recall index rebuilt"

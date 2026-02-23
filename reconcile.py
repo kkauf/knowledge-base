@@ -19,14 +19,12 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 
-DB_PATH = os.path.expanduser("~/.claude/knowledge/knowledge.db")
+from config import get_db_path, get_owner_entity_names
+
+DB_PATH = str(get_db_path())
 
 # Manually confirmed semantic duplicates: (canonical_name, duplicate_name)
-SEMANTIC_MERGES = [
-    ("Konstantin Kaufmann", "Kkaufmann"),
-    ("Konstantin Kaufmann", "K Kaufmann"),
-    ("Konstantin Kaufmann", "K. Kaufmann"),
-]
+SEMANTIC_MERGES = get_owner_entity_names()
 
 
 def normalize(name: str) -> str:

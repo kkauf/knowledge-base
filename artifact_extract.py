@@ -32,8 +32,10 @@ from pathlib import Path
 
 # Reuse parsing infrastructure from extract.py
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config import (get_openrouter_url, get_reconciliation_model, get_kb_dir,
+                    get_pending_file, get_artifact_offsets_file, get_api_key,
+                    get_http_referer)
 from extract import (
-    get_api_key,
     parse_session_jsonl,
     parse_session_incremental,
     save_session_offset,
@@ -44,11 +46,11 @@ from extract import (
 
 # --- Config ---
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "z-ai/glm-5"  # GLM-5: precision > cost > speed (ADR-004)
-KB_DIR = Path.home() / ".claude" / "knowledge"
-PENDING_FILE = KB_DIR / "artifacts-pending.json"
-ARTIFACT_OFFSETS_FILE = KB_DIR / ".artifact-offsets.json"
+OPENROUTER_URL = get_openrouter_url()
+DEFAULT_MODEL = get_reconciliation_model()
+KB_DIR = get_kb_dir()
+PENDING_FILE = get_pending_file()
+ARTIFACT_OFFSETS_FILE = get_artifact_offsets_file()
 
 # Separate offset tracking from fact extraction — they may run at different
 # cadences or one may fail while the other succeeds.
@@ -225,7 +227,7 @@ def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL,
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com/kkaufmann/knowledge-base",
+            **({"HTTP-Referer": get_http_referer()} if get_http_referer() else {}),
             "X-Title": "KB Artifact Extraction",
         },
     )

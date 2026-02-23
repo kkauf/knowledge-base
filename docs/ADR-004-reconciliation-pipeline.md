@@ -82,7 +82,7 @@ Runs per-transcript. Identifies structured work products that go beyond individu
       "type": "plan",
       "title": "Matching Engine V2 Roadmap",
       "summary": "5-step plan covering profile depth, scoring, and honest framing",
-      "domain": "KH",
+      "domain": "EO",
       "entities_referenced": ["matching engine", "profile depth", "Roadmap"],
       "content": "1. Implement profile depth scoring...\n2. ...",
       "source_session": "abc123.jsonl",
@@ -156,7 +156,7 @@ Runs once per batch (all transcripts from the day). Loads current system state a
     {
       "artifact": "Matching Engine V2 Roadmap step 2",
       "conflicts_with": "Active Context says profile depth is deprioritized",
-      "recommendation": "Review with Konstantin — Active Context NOT modified"
+      "recommendation": "Review with Jane — Active Context NOT modified"
     }
   ],
   "reconciliation_summary": "3 new tasks proposed, 1 existing task enriched, 1 conflict flagged"
@@ -217,14 +217,14 @@ The reconciliation model assesses each proposed action with a confidence level:
 - **low** (<50%): Ambiguous — something might be done, or the discussion might invalidate existing content. Flag only.
 
 Confidence is based on:
-1. **Signal strength**: "committed and deployed EARTH-294" > "we discussed profile changes"
+1. **Signal strength**: "committed and deployed PROJ-294" > "we discussed profile changes"
 2. **Recency**: Yesterday's session > last week's session
 3. **Corroboration**: Multiple sessions confirm the same change > single mention
 4. **Explicitness**: Tool calls (konban done, notion-docs update) > verbal discussion
 
 #### Audit Trail
 
-Every action logged to `~/.claude/knowledge/reconciliation.log` with: what changed, what the previous value was (for mutations), transcript evidence, confidence score. This enables:
+Every action logged to `~/.knowledge-base/reconciliation.log` with: what changed, what the previous value was (for mutations), transcript evidence, confidence score. This enables:
 - Spot-checking at standup
 - Rollback via `pipeline.py --rollback <action-id>` (planned)
 - Learning from corrections over time
@@ -241,7 +241,7 @@ DONE (spot-check if wrong):
 
 YOUR CALL:
   [1] "Roadmap" still says Profile Expansion at #6, moved to #1 per Feb 20 session. Update?
-  [2] "Send Jörg response" — email appears sent. Mark done?
+  [2] "Send Client B response" — email appears sent. Mark done?
 ```
 
 User says "yes, yes" and the standup Claude executes both. Total reconciliation review: 30 seconds.
@@ -254,12 +254,12 @@ User says "yes, yes" and the standup Claude executes both. Total reconciliation 
 
 ### Stage 1 (Extraction): Piggyback on existing 30-min daemon
 
-When the daemon processes a session for fact extraction, also run artifact extraction. Store artifacts in `~/.claude/knowledge/artifacts-pending.json`. Cost: +40-70s per session.
+When the daemon processes a session for fact extraction, also run artifact extraction. Store artifacts in `~/.knowledge-base/artifacts-pending.json`. Cost: +40-70s per session.
 
 **Critical change: per-session offset tracking.** The current daemon takes the "last 50 messages" of a session — this creates gaps. Messages 200-350 are never seen if the session grew from 200 to 400 messages between runs.
 
 New approach:
-- Track per-session high-water mark in `~/.claude/knowledge/.session-offsets.json`: `{"session_id": last_processed_message_index}`
+- Track per-session high-water mark in `~/.knowledge-base/.session-offsets.json`: `{"session_id": last_processed_message_index}`
 - Each run: read messages from offset to end (the delta)
 - Include last 10 messages from previous window as context overlap (so the model understands references)
 - Extraction prompt marks `[--- NEW MESSAGES BELOW ---]` to focus extraction on new content only
@@ -293,7 +293,7 @@ Multiple concurrent sessions (different projects) are processed independently. C
 
 **Decision: GLM-5 (`z-ai/glm-5`)** for both Stage 1 and Stage 2. Precision matters most for an autonomous system — false positives create noise (garbage Konban tasks). GLM-5 was more precise (exact title matches, no spurious results) and consistent between runs. Qwen was cheaper/faster but inconsistent (different results on same input). Cost difference ($0.01 vs $0.02/night) is irrelevant at this scale. Sonnet via OpenRouter failed; Batch API skipped (unreliable in practice).
 
-**Benchmark results** (eval-001, Carlotta interview analysis):
+**Benchmark results** (eval-001, User A interview analysis):
 
 | Variable | Options |
 |----------|---------|
@@ -371,20 +371,20 @@ The Brain has a hierarchical structure with typed sections. The daemon routes do
 15. ~~**Artifact decomposition**~~ Done: When artifacts contain both analysis and actionable recommendations, the reconciler produces compound actions — Brain doc (the "why") + Konban tasks (the "what"). Cross-referenced bidirectionally: tasks log the Brain doc pointer, Brain docs list which tasks were created. Prevents recommendations from sitting inert inside reference documents.
 16. ~~**Add `done_konban_task` to Tier 1**~~ Done: Moved from DENIED to ALLOWED with confidence gating. Executor rejects unless `confidence: "high"`. Evidence logged before marking done. Reconciler uses explicit signal detection ("shipped", "deployed", "committed", tool calls).
 17. ~~**Add confidence scoring**~~ Done: Every action requires `confidence: high|medium|low`. High → auto-execute. Medium → deferred to `standup-proposals.json` for standup review. Low → skipped. Based on signal strength, recency, corroboration, explicitness.
-18. ~~**Split reconciliation output**~~ Done: Review summary now has two sections: **DONE** (auto-executed, spot-check) and **YOUR CALL** (deferred proposals, approve/dismiss). Deferred actions saved to `~/.claude/knowledge/standup-proposals.json`.
+18. ~~**Split reconciliation output**~~ Done: Review summary now has two sections: **DONE** (auto-executed, spot-check) and **YOUR CALL** (deferred proposals, approve/dismiss). Deferred actions saved to `~/.knowledge-base/standup-proposals.json`.
 19. ~~**Add Brain index to reconciliation context**~~ Done: `load_brain_index()` loads `notion-api.py index` output alongside Active Context, Konban, and KB decisions. Enables accurate enrich-vs-create decisions.
 
-20. ~~**Add git commit history as data source**~~ Done: `load_git_history(days=7)` scans kaufmann-health and knowledge-base repos. Git commits are the strongest "done" signal — more reliable than conversation language. Reconciler uses `Ship:` prefix for explicit deployment, `feat()` commits for features shipped.
+20. ~~**Add git commit history as data source**~~ Done: `load_git_history(days=7)` scans example-project and knowledge-base repos. Git commits are the strongest "done" signal — more reliable than conversation language. Reconciler uses `Ship:` prefix for explicit deployment, `feat()` commits for features shipped.
 21. ~~**State consistency check**~~ Done: Proactive comparison of Active Context priorities and Konban tasks against git commits. Runs on every pipeline invocation (even with no pending artifacts). Uses semantic matching with German synonym support. Flags both fully completed and partially completed items. Stale findings merge into action plan as conflicts for standup review.
 
-**Phase 2 closing test (Feb 22):** Drained 6 daemon-produced pending artifacts. 2 Brain docs auto-created (EARTH-294 root cause analysis, profile enrichment concept), 4 correctly filtered (ephemeral/minor). State consistency check flagged profile depth workstream (a) as shipped. Zero failures. Pipeline handles real daemon output end-to-end.
+**Phase 2 closing test (Feb 22):** Drained 6 daemon-produced pending artifacts. 2 Brain docs auto-created (PROJ-294 root cause analysis, profile enrichment concept), 4 correctly filtered (ephemeral/minor). State consistency check flagged profile depth workstream (a) as shipped. Zero failures. Pipeline handles real daemon output end-to-end.
 
 ### Phase 3: Standup integration & skill self-improvement (in progress)
 
 22. ~~**Interactive approval at standup**~~ Done: `pipeline.py --show-proposals`, `--approve <indices|all>`, `--dismiss-proposals`. Human approval overrides confidence to "high" and executes via the standard executor. Standup protocol updated with step 3a: present YOUR CALL proposals, handle natural-language approval ("approve all", "1 and 3 yes, skip 2"), execute approved actions, report results. Stale state conflicts are informational for next Kraken session.
 23. **Rollback capability** — `pipeline.py --rollback <action-id>` undoes a specific auto-executed action using audit log's "previous value" field.
 24. **Feedback loop** — Log rejections of Tier 2 proposals. Over time, tune confidence thresholds based on rejection rate.
-25. ~~**Dynamic Context Frame**~~ Done: `context_frame.py` generates a context frame from live system state (Konban board, Active Context, Brain index, KB activity) that's injected into extraction prompts. Cached at `~/.claude/knowledge/context-frame.md` with 6h TTL. Daemon refreshes it at the start of each run. This gives the extraction LLM awareness of active commitments so it can recognize scheduling decisions, progress signals, and friction signals as extractable — not ephemeral. New artifact type: `commitment_update` (reschedule/progress/friction/completion). New executor action: `update_konban_task` (update title, due date). Motivated by MBA scheduling conversations being invisible to the pipeline because extraction had no concept of "what matters."
+25. ~~**Dynamic Context Frame**~~ Done: `context_frame.py` generates a context frame from live system state (Konban board, Active Context, Brain index, KB activity) that's injected into extraction prompts. Cached at `~/.knowledge-base/context-frame.md` with 6h TTL. Daemon refreshes it at the start of each run. This gives the extraction LLM awareness of active commitments so it can recognize scheduling decisions, progress signals, and friction signals as extractable — not ephemeral. New artifact type: `commitment_update` (reschedule/progress/friction/completion). New executor action: `update_konban_task` (update title, due date). Motivated by MBA scheduling conversations being invisible to the pipeline because extraction had no concept of "what matters."
 26. ~~**Fix first-time session processing**~~ Done: Changed `parse_session_incremental` to process ALL messages on first encounter instead of only the last 50. The old "last 50" behavior silently dropped early-session content — in long standup sessions (800+ messages), the first 750 messages were permanently lost. The extraction LLM's existing 50K char truncation handles overly long transcripts gracefully.
 27. ~~**Automated skill improvement pipeline**~~ Done: Closes the loop from skill helper errors to SKILL.md documentation fixes. Five changes across the codebase:
 

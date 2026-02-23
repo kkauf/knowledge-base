@@ -31,7 +31,8 @@ from pathlib import Path
 
 # Add parent dir to path for extract.py imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from extract import parse_session_jsonl, get_api_key
+from extract import parse_session_jsonl
+from config import get_api_key, get_http_referer
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -181,15 +182,19 @@ def call_model(prompt: str, user_content: str, model: str) -> dict:
         "provider": {"data_collection": "deny"},
     }).encode("utf-8")
 
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "X-Title": "KB Reconciliation Benchmark",
+    }
+    referer = get_http_referer()
+    if referer:
+        headers["HTTP-Referer"] = referer
+
     req = urllib.request.Request(
         OPENROUTER_URL,
         data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com/kkaufmann/knowledge-base",
-            "X-Title": "KB Reconciliation Benchmark",
-        },
+        headers=headers,
     )
 
     start = time.time()

@@ -26,9 +26,11 @@ sys.path.insert(0, str(script_dir))
 import extract
 import briefing
 
-SESSIONS_DIR = Path.home() / ".claude" / "projects"
-MIN_SIZE = 10_000  # Skip sessions < 10KB (trivial/empty)
-LOG_PATH = Path.home() / ".claude" / "knowledge" / "backfill.log"
+from config import get_sessions_dir, get_backfill_log, get_extraction_model, cfg, get_username_path_segment
+
+SESSIONS_DIR = get_sessions_dir()
+MIN_SIZE = cfg("backfill_min_session_size", 10000)
+LOG_PATH = get_backfill_log()
 
 
 def log(msg: str):
@@ -91,13 +93,13 @@ def get_session_date(path: Path) -> str:
 
 def get_project_name(path: Path) -> str:
     """Extract project name from session path."""
-    # Path looks like: ~/.claude/projects/-Users-kkaufmann-github-kaufmann-health/abc123.jsonl
+    # Path looks like: ~/.claude/projects/-Users-jdoe-github-my-project/abc123.jsonl
     parts = path.parts
     for i, p in enumerate(parts):
         if p == "projects" and i + 1 < len(parts):
             proj = parts[i + 1]
             # Clean up the path-encoded project name
-            proj = proj.lstrip('-').replace('-Users-kkaufmann-', '').replace('-', '/')
+            proj = proj.lstrip('-').replace(get_username_path_segment(), '').replace('-', '/')
             return proj
     return "unknown"
 

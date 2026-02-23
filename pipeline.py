@@ -36,13 +36,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-KB_DIR = Path.home() / ".claude" / "knowledge"
-PENDING_FILE = KB_DIR / "artifacts-pending.json"
-REVIEW_FILE = KB_DIR / "reconciliation-review.md"
-AUDIT_LOG = KB_DIR / "reconciliation.log"
-SKILL_FIXES_FILE = KB_DIR / "skill-fixes-pending.json"
-SESSION_OFFSETS_FILE = KB_DIR / ".session-offsets.json"
-ARTIFACT_OFFSETS_FILE = KB_DIR / ".artifact-offsets.json"
+from config import (get_kb_dir, get_pending_file, get_review_file, get_audit_log,
+                    get_skill_fixes_file, get_session_offsets_file,
+                    get_artifact_offsets_file, get_proposals_file)
+
+KB_DIR = get_kb_dir()
+PENDING_FILE = get_pending_file()
+REVIEW_FILE = get_review_file()
+AUDIT_LOG = get_audit_log()
+SKILL_FIXES_FILE = get_skill_fixes_file()
+SESSION_OFFSETS_FILE = get_session_offsets_file()
+ARTIFACT_OFFSETS_FILE = get_artifact_offsets_file()
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 RECONCILE_SCRIPT = SCRIPTS_DIR / "pipeline_reconcile.py"
@@ -195,7 +199,7 @@ def run_executor(plan_file: str, dry_run: bool = False):
     return result.returncode
 
 
-PROPOSALS_FILE = KB_DIR / "standup-proposals.json"
+PROPOSALS_FILE = get_proposals_file()
 
 
 def show_proposals():

@@ -31,12 +31,16 @@ from pathlib import Path
 
 # --- Paths ---
 
-KB_DIR = Path.home() / ".claude" / "knowledge"
-AUDIT_LOG = KB_DIR / "reconciliation.log"
-REVIEW_FILE = KB_DIR / "reconciliation-review.md"
+from config import (get_kb_dir, get_audit_log, get_review_file, get_konban_script,
+                    get_brain_script, get_skills_dir, get_skill_fixes_file,
+                    get_proposals_file)
 
-KONBAN_SCRIPT = Path.home() / ".claude" / "skills" / "konban" / "notion-api.py"
-BRAIN_SCRIPT = Path.home() / ".claude" / "skills" / "notion-docs" / "notion-api.py"
+KB_DIR = get_kb_dir()
+AUDIT_LOG = get_audit_log()
+REVIEW_FILE = get_review_file()
+
+KONBAN_SCRIPT = get_konban_script()
+BRAIN_SCRIPT = get_brain_script()
 
 # --- Permission Model ---
 
@@ -148,6 +152,8 @@ def check_permission(action: dict) -> tuple[bool, str]:
 
 def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
     """Create a Konban task."""
+    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
+        return {"status": "failed", "reason": "Konban script not available"}
     title = action.get("title") or action.get("target", "Untitled")
     # Tag all daemon-created tasks
     if "[daemon]" not in title:
@@ -193,6 +199,8 @@ def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
 
 def execute_log_konban_task(action: dict, dry_run: bool) -> dict:
     """Log a message on an existing Konban task."""
+    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
+        return {"status": "failed", "reason": "Konban script not available"}
     task_id = action.get("task_id", "")
     target = action.get("target", "")
     content = action.get("content", "")
@@ -242,6 +250,8 @@ def execute_log_konban_task(action: dict, dry_run: bool) -> dict:
 
 def execute_done_konban_task(action: dict, dry_run: bool) -> dict:
     """Mark a Konban task as done. Only executes with high confidence."""
+    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
+        return {"status": "failed", "reason": "Konban script not available"}
     task_id = action.get("task_id", "")
     target = action.get("target", "")
     evidence = action.get("content", "")
@@ -287,6 +297,8 @@ def execute_done_konban_task(action: dict, dry_run: bool) -> dict:
 
 def execute_update_konban_task(action: dict, dry_run: bool) -> dict:
     """Update a Konban task's metadata (title, due date, priority, timebox)."""
+    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
+        return {"status": "failed", "reason": "Konban script not available"}
     task_id = action.get("task_id", "")
     target = action.get("target", "")
     source = action.get("source_artifact", "unknown")
@@ -346,6 +358,8 @@ def execute_update_konban_task(action: dict, dry_run: bool) -> dict:
 
 def execute_create_brain_doc(action: dict, dry_run: bool) -> dict:
     """Create a Brain doc under the appropriate section."""
+    if not BRAIN_SCRIPT or not BRAIN_SCRIPT.exists():
+        return {"status": "failed", "reason": "Brain script not available"}
     title = action.get("title") or action.get("target", "Untitled")
     content = action.get("content", "")
     source = action.get("source_artifact", "unknown")
@@ -386,6 +400,8 @@ def execute_enrich_brain_doc(action: dict, dry_run: bool) -> dict:
     Only safe when the new section is purely additive — we never touch existing content.
     Falls back to patch if the section already exists (re-enrichment replaces previous daemon section).
     """
+    if not BRAIN_SCRIPT or not BRAIN_SCRIPT.exists():
+        return {"status": "failed", "reason": "Brain script not available"}
     target = action.get("target", "")
     section_name = action.get("section_name", "Daemon Enrichment")
     content = action.get("content", "")
@@ -451,7 +467,7 @@ def execute_enrich_brain_doc(action: dict, dry_run: bool) -> dict:
     return result
 
 
-SKILLS_DIR = Path.home() / ".claude" / "skills"
+SKILLS_DIR = get_skills_dir()
 
 
 def _apply_skill_patch(skill: str, patch_type: str, section_heading: str = None,
@@ -546,7 +562,7 @@ def _save_skill_proposal(proposal: dict) -> bool:
 
     Returns True if saved, False if duplicate.
     """
-    review_path = KB_DIR / "skill-fixes-pending.json"
+    review_path = get_skill_fixes_file()
     existing = []
     if review_path.exists():
         try:
@@ -795,7 +811,7 @@ def execute_plan(plan: dict, dry_run: bool = False) -> dict:
 
     # Save deferred proposals for standup
     if report["proposals"] and not dry_run:
-        proposals_file = KB_DIR / "standup-proposals.json"
+        proposals_file = get_proposals_file()
         existing_proposals = []
         if proposals_file.exists():
             try:
@@ -997,12 +1013,16 @@ def generate_review(report: dict = None) -> str:
         for c in conflicts_detail:
             what = c.get("conflicts_with", c.get("artifact", "?"))
             rec = c.get("recommendation", "review needed")
+            # Extract just the action (after last —) for brevity
+            parts = rec.split(" — ")
+            action = parts[-1] if len(parts) > 1 else rec
+            evidence = parts[0] if len(parts) > 1 else ""
             lines.append(f"  - {what}")
-            lines.append(f"    → {rec[:150]}")
+            lines.append(f"    → {action}")
         lines.append("")
 
     # Pending skill fixes (proposals from previous runs)
-    skill_fixes_file = KB_DIR / "skill-fixes-pending.json"
+    skill_fixes_file = get_skill_fixes_file()
     if skill_fixes_file.exists():
         try:
             pending_fixes = json.loads(skill_fixes_file.read_text())

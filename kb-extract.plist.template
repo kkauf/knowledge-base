@@ -3,18 +3,18 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.kaufmann.kb-extract</string>
+    <string>__DAEMON_LABEL__</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/kkaufmann/github/knowledge-base/kb-extract-daemon.sh</string>
+        <string>__REPO_DIR__/kb-extract-daemon.sh</string>
     </array>
     <key>StartInterval</key>
     <integer>1800</integer>
     <key>StandardOutPath</key>
-    <string>/Users/kkaufmann/.claude/knowledge/launchd-stdout.log</string>
+    <string>__KB_DIR__/launchd-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/kkaufmann/.claude/knowledge/launchd-stderr.log</string>
+    <string>__KB_DIR__/launchd-stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>

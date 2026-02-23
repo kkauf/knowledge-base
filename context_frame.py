@@ -35,14 +35,15 @@ from pathlib import Path
 
 # --- Paths ---
 
-KB_DIR = Path.home() / ".claude" / "knowledge"
-CONTEXT_FRAME_FILE = KB_DIR / "context-frame.md"
-DB_PATH = KB_DIR / "knowledge.db"
+from config import (get_kb_dir, get_context_frame_path, get_db_path,
+                    get_konban_script, get_brain_script, cfg)
 
-KONBAN_SCRIPT = Path.home() / ".claude" / "skills" / "konban" / "notion-api.py"
-BRAIN_SCRIPT = Path.home() / ".claude" / "skills" / "notion-docs" / "notion-api.py"
-
-DEFAULT_TTL_HOURS = 6
+KB_DIR = get_kb_dir()
+CONTEXT_FRAME_FILE = get_context_frame_path()
+DB_PATH = get_db_path()
+KONBAN_SCRIPT = get_konban_script()
+BRAIN_SCRIPT = get_brain_script()
+DEFAULT_TTL_HOURS = cfg("context_frame_ttl_hours", 6)
 
 
 # --- Helpers ---
@@ -60,7 +61,7 @@ def run_cmd(args: list[str], timeout: int = 30) -> str:
 
 def load_konban_board() -> str:
     """Load current Konban board — active commitments across all domains."""
-    if not KONBAN_SCRIPT.exists():
+    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
         return "[Konban unavailable]"
     output = run_cmd(["python3", str(KONBAN_SCRIPT), "board"], timeout=30)
     return output or "[Konban empty or unavailable]"
@@ -68,7 +69,7 @@ def load_konban_board() -> str:
 
 def load_active_context_summary() -> str:
     """Load Active Context from Brain — strategic priorities."""
-    if not BRAIN_SCRIPT.exists():
+    if not BRAIN_SCRIPT or not BRAIN_SCRIPT.exists():
         return "[Brain unavailable]"
     output = run_cmd(["python3", str(BRAIN_SCRIPT), "read", "Active Context", "--raw"], timeout=30)
     if not output:
@@ -81,7 +82,7 @@ def load_active_context_summary() -> str:
 
 def load_brain_index() -> str:
     """Load Brain doc index — what's already documented."""
-    if not BRAIN_SCRIPT.exists():
+    if not BRAIN_SCRIPT or not BRAIN_SCRIPT.exists():
         return "[Brain unavailable]"
     output = run_cmd(["python3", str(BRAIN_SCRIPT), "index"], timeout=30)
     return output or "[Brain index unavailable]"

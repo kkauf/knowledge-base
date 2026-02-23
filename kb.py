@@ -7,7 +7,9 @@ import sys
 import os
 from datetime import datetime, timezone
 
-DB_PATH = os.path.expanduser("~/.claude/knowledge/knowledge.db")
+from config import get_db_path, get_kb_dir, get_daemon_label, get_domains
+
+DB_PATH = str(get_db_path())
 
 
 def get_db():
@@ -363,7 +365,7 @@ def cmd_decide(args):
 def cmd_status(args):
     """Show KB health: daemon status, last extraction, DB stats."""
     import subprocess
-    kb_dir = os.path.expanduser("~/.claude/knowledge")
+    kb_dir = str(get_kb_dir())
     marker_path = os.path.join(kb_dir, ".last-extraction")
     log_path = os.path.join(kb_dir, "extraction.log")
     brief_path = os.path.join(kb_dir, "BRIEF.md")
@@ -392,7 +394,7 @@ def cmd_status(args):
     # 2. Daemon status
     try:
         result = subprocess.run(
-            ["launchctl", "print", f"gui/{os.getuid()}/com.kaufmann.kb-extract"],
+            ["launchctl", "print", f"gui/{os.getuid()}/{get_daemon_label()}"],
             capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
@@ -451,9 +453,9 @@ def cmd_status(args):
 def cmd_domain(args):
     """List entities in a domain with their top facts."""
     db = get_db()
-    # Normalize domain name (case-insensitive lookup)
-    domain_map = {"kh": "KH", "personal": "Personal", "infrastructure": "Infrastructure",
-                  "vss": "VSS", "isai": "IsAI", "other": "Other"}
+    # Normalize domain name (case-insensitive lookup from config)
+    domain_map = {name.lower(): name for name, _ in get_domains()}
+    domain_map["other"] = "Other"
     domain = domain_map.get(args.domain.lower(), args.domain)
 
     # Check if entity_domains table exists
@@ -477,7 +479,8 @@ def cmd_domain(args):
 
     if not entities:
         print(f"No entities in domain '{domain}'")
-        print(f"Available domains: KH, Personal, Infrastructure, VSS, IsAI, Other")
+        available = ", ".join(name for name, _ in get_domains()) + ", Other"
+        print(f"Available domains: {available}")
         sys.exit(1)
 
     print(f"\n  Domain: {domain} ({len(entities)} entities)")
@@ -563,7 +566,7 @@ def main():
 
     # domain
     p_domain = subparsers.add_parser('domain', help='List entities in a domain (brain region)')
-    p_domain.add_argument('domain', help='Domain name: KH, Personal, Infrastructure, VSS, IsAI, Other')
+    p_domain.add_argument('domain', help='Domain name (as configured in config.json)')
     p_domain.add_argument('--facts', type=int, default=3, help='Max facts per entity (default: 3, 0=names only)')
 
     args = parser.parse_args()

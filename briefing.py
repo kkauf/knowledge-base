@@ -9,19 +9,13 @@ import sqlite3
 import os
 from datetime import datetime, timezone
 
-DB_PATH = os.path.expanduser("~/.claude/knowledge/knowledge.db")
-BRIEF_PATH = os.path.expanduser("~/.claude/knowledge/BRIEF.md")
+from config import (get_db_path, get_brief_path, get_domains, get_domain_order,
+                    get_briefing_key_entities, get_briefing_key_attrs)
 
-# Domain detection from source field patterns (used for new facts without entity_domains entry)
-DOMAIN_RULES = [
-    ("KH", ["kaufmann-health", "kaufmann/health", "kaufmann%health"]),
-    ("Personal", ["Personal-Support", "Personal/Support", "cornell", "email-katherine"]),
-    ("VSS", ["vss"]),
-    ("IsAI", ["IsAIConsciousYet", "isai"]),
-    ("Infrastructure", ["claude-sessions", "knowledge-base", "kkauf"]),
-]
-
-DOMAIN_ORDER = ["KH", "Personal", "Infrastructure", "VSS", "IsAI", "Other"]
+DB_PATH = str(get_db_path())
+BRIEF_PATH = str(get_brief_path())
+DOMAIN_RULES = get_domains()
+DOMAIN_ORDER = get_domain_order()
 
 
 def detect_domain(source: str) -> str:
@@ -106,14 +100,13 @@ def generate():
     lines.append("")
 
     # --- Key Numbers (high-value metrics from top entities) ---
-    key_entities = ["Kaufmann Health", "Cal.com", "Konstantin Kaufmann"]
-    key_attrs = [
-        "booking_value", "conversion_rate", "conversion_multiplier",
-        "cal_live_therapists", "leads_per_30d", "cost_per_lead",
-        "primary_conversion_signal", "north_star_metric",
-    ]
+    key_entities = get_briefing_key_entities()
+    key_attrs = get_briefing_key_attrs()
 
-    key_facts = db.execute("""
+    if not key_entities or not key_attrs:
+        key_facts = []
+    else:
+        key_facts = db.execute("""
         SELECT e.name, f.attribute, f.value
         FROM facts f JOIN entities e ON f.entity_id = e.id
         WHERE f.valid_to IS NULL
@@ -188,7 +181,8 @@ def generate():
     # --- Footer ---
     lines.append("---")
     lines.append(f"*{relation_count} relations, {decision_count} active decisions.*")
-    lines.append(f"*Deep lookup: `kb.py query \"entity\"` | `kb.py search \"term\"` | `kb.py domain \"KH\"`*")
+    first_domain = DOMAIN_ORDER[0] if DOMAIN_ORDER else "MyDomain"
+    lines.append(f"*Deep lookup: `kb.py query \"entity\"` | `kb.py search \"term\"` | `kb.py domain \"{first_domain}\"`*")
 
     db.close()
 

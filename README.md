@@ -4,12 +4,12 @@ A local, file-based knowledge management system that captures facts, decisions, 
 
 ## Problem
 
-Claude Code sessions are ephemeral. Even with MEMORY.md and CLAUDE.md instructions, Claude regularly forgets facts ("Marta quit", "concierge matching was removed", "Katherine's role changed"). The root cause: there's no structured knowledge layer between Claude and the user's world.
+Claude Code sessions are ephemeral. Even with MEMORY.md and CLAUDE.md instructions, Claude regularly forgets facts ("Alice left", "Feature X was removed", "Bob's role changed"). The root cause: there's no structured knowledge layer between Claude and the user's world.
 
 ## Architecture
 
 ```
-~/.claude/knowledge/
+~/.knowledge-base/
 ├── knowledge.db              # SQLite — the truth store
 ├── BRIEF.md                  # Auto-generated context file (loaded by Claude)
 ├── entity-index.json         # Entity name index (rebuilt by daemon)
@@ -100,14 +100,14 @@ cd ~/github/knowledge-base
 
 ### Knowledge queries
 ```bash
-python3 ~/.claude/knowledge/kb.py query "marta"      # Entity lookup
-python3 ~/.claude/knowledge/kb.py search "QA"         # Full-text search
-python3 ~/.claude/knowledge/kb.py decisions            # Active decisions
-python3 ~/.claude/knowledge/kb.py domain "KH"          # Domain filter
-python3 ~/.claude/knowledge/kb.py status               # Health check
-python3 ~/.claude/knowledge/kb.py correct "Entity" attr "value"  # Fix a fact
-python3 ~/.claude/knowledge/kb.py delete-fact "Entity" attr      # Remove a fact
-python3 ~/.claude/knowledge/kb.py recent --days 7      # Audit recent extractions
+python3 ~/.knowledge-base/kb.py query "alice"          # Entity lookup
+python3 ~/.knowledge-base/kb.py search "QA"            # Full-text search
+python3 ~/.knowledge-base/kb.py decisions              # Active decisions
+python3 ~/.knowledge-base/kb.py domain "EO"            # Domain filter
+python3 ~/.knowledge-base/kb.py status                 # Health check
+python3 ~/.knowledge-base/kb.py correct "Entity" attr "value"  # Fix a fact
+python3 ~/.knowledge-base/kb.py delete-fact "Entity" attr      # Remove a fact
+python3 ~/.knowledge-base/kb.py recent --days 7        # Audit recent extractions
 ```
 
 ### Pipeline
@@ -136,9 +136,9 @@ python3 ~/github/knowledge-base/pipeline_reconcile.py --consistency-only
 
 ### Manual extraction
 ```bash
-python3 ~/.claude/knowledge/extract.py --last-session
-python3 ~/.claude/knowledge/extract.py --input transcript.txt
-python3 ~/.claude/knowledge/briefing.py   # Regenerate BRIEF.md
+python3 ~/.knowledge-base/extract.py --last-session
+python3 ~/.knowledge-base/extract.py --input transcript.txt
+python3 ~/.knowledge-base/briefing.py   # Regenerate BRIEF.md
 ```
 
 ## Model Selection

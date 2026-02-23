@@ -1,0 +1,32 @@
+{
+  "kb_dir": "~/.knowledge-base",
+  "sessions_dir": "~/.claude/projects",
+  "skills_dir": "~/.claude/skills",
+  "openrouter_api_key_sources": [
+    "env:OPENROUTER_API_KEY",
+    "~/.knowledge-base/secrets/openrouter.env"
+  ],
+  "extraction_model": "qwen/qwen3.5-397b-a17b",
+  "reconciliation_model": "z-ai/glm-5",
+  "http_referer": "",
+  "domains": [
+    {"name": "MyProject", "patterns": ["my-project", "my/project"]},
+    {"name": "Personal", "patterns": ["personal-support", "personal/support"]},
+    {"name": "Infrastructure", "patterns": ["knowledge-base", "claude-sessions"]}
+  ],
+  "git_repos": [
+    "~/github/my-project"
+  ],
+  "owner_entity_names": ["Jane Doe", "jdoe", "J. Doe"],
+  "external_tools": {
+    "konban_script": "",
+    "brain_script": "",
+    "recall_script": ""
+  },
+  "daemon_label": "org.knowledge-base.extract",
+  "briefing": {
+    "key_entities": ["My Project"],
+    "key_attrs": ["status", "version", "users"],
+    "domain_order": ["MyProject", "Personal", "Infrastructure", "Other"]
+  }
+}

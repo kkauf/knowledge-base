@@ -24,16 +24,20 @@ import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = os.path.expanduser("~/.claude/knowledge/knowledge.db")
-SESSION_OFFSETS_FILE = os.path.expanduser("~/.claude/knowledge/.session-offsets.json")
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "qwen/qwen3.5-397b-a17b"
-CONTEXT_OVERLAP = 10  # Messages from previous window included for context
+from config import (get_db_path, get_session_offsets_file, get_openrouter_url,
+                    get_extraction_model, get_api_key, get_http_referer,
+                    detect_domain as _config_detect_domain, cfg)
+
+DB_PATH = str(get_db_path())
+SESSION_OFFSETS_FILE = str(get_session_offsets_file())
+OPENROUTER_URL = get_openrouter_url()
+DEFAULT_MODEL = get_extraction_model()
+CONTEXT_OVERLAP = cfg("context_overlap", 10)
 
 SYSTEM_PROMPT = """You are a knowledge extraction system. Extract durable facts, decisions, and relationships from the transcript below. NOT ephemeral tasks or to-dos.
 
 IMPORTANT DISTINCTIONS:
-- DURABLE FACTS: Things that are true beyond this conversation. "Marta quit." "Katherine's role changed to strategy." "Concierge matching feature removed."
+- DURABLE FACTS: Things that are true beyond this conversation. "Alice quit." "Bob's role changed to strategy." "Feature X removed."
 - EPHEMERAL TASKS: Things to do this week. "Contact institutes Monday." "Send booking link." DO NOT extract these.
 - DECISIONS: Choices made that change how things work. "Mandatory therapist onboarding going forward." "Konstantin handles document reviews."
 
@@ -62,7 +66,7 @@ Return ONLY valid JSON in this exact format:
 }
 
 Rules:
-- Entity names should be consistent (use full names for people: "Marta Sapor", not "Marta")
+- Entity names should be consistent (use full names for people: "Alice Smith", not "Alice")
 - Attributes should be lowercase, snake_case: "role", "status", "availability", "email"
 - Relation types: "works_for", "member_of", "manages", "owns", "part_of", "depends_on", "married_to"
 - If a relation ended, set "ended": true
@@ -79,18 +83,7 @@ Rules:
 
 def detect_session_domain(session_path: str) -> str:
     """Detect domain from session project path."""
-    path_lower = session_path.lower() if session_path else ""
-    if "kaufmann-health" in path_lower or "kaufmann/health" in path_lower:
-        return "KH"
-    if "personal-support" in path_lower or "personal/support" in path_lower:
-        return "Personal"
-    if "vss" in path_lower:
-        return "VSS"
-    if "isai" in path_lower or "isaiconsciousyet" in path_lower:
-        return "IsAI"
-    if "claude-sessions" in path_lower or "knowledge-base" in path_lower or "kkauf" in path_lower:
-        return "Infrastructure"
-    return None  # Unknown — skip context injection
+    return _config_detect_domain(session_path)
 
 
 def load_domain_context(db: sqlite3.Connection, domain: str, max_entities: int = 100) -> str:
@@ -145,39 +138,6 @@ def load_domain_context(db: sqlite3.Connection, domain: str, max_entities: int =
     return "\n".join(lines)
 
 
-def get_api_key() -> str:
-    """Get OpenRouter API key from env or secrets file."""
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if key:
-        return key
-
-    # Try loading from secrets file
-    secrets_path = os.path.expanduser("~/.claude/secrets/openrouter.env")
-    if os.path.exists(secrets_path):
-        with open(secrets_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    if k.strip() == "OPENROUTER_API_KEY":
-                        return v.strip()
-
-    # Try VSS .env.local as fallback
-    vss_env = os.path.expanduser("~/github/vss/.env.local")
-    if os.path.exists(vss_env):
-        with open(vss_env) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    if "OPENROUTER" in k.upper():
-                        return v.strip()
-
-    print("Error: No OpenRouter API key found.", file=sys.stderr)
-    print("Set OPENROUTER_API_KEY env var or create ~/.claude/secrets/openrouter.env", file=sys.stderr)
-    sys.exit(2)
-
-
 def get_db():
     if not os.path.exists(DB_PATH):
         print(f"Error: Database not found at {DB_PATH}", file=sys.stderr)
@@ -216,7 +176,7 @@ def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL, domain_co
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com/kkaufmann/knowledge-base",
+            **({"HTTP-Referer": get_http_referer()} if get_http_referer() else {}),
             "X-Title": "Knowledge Base Extraction",
         },
     )
@@ -772,8 +732,9 @@ def find_last_session() -> tuple[str, str]:
     Returns (transcript, session_path) where session_path includes the project path
     for domain detection.
     """
-    # Claude Code stores sessions in ~/.claude/projects/
-    projects_dir = Path.home() / ".claude" / "projects"
+    # Claude Code stores sessions in the configured projects directory
+    from config import get_sessions_dir
+    projects_dir = get_sessions_dir()
     if not projects_dir.exists():
         print("Error: No Claude Code projects directory found", file=sys.stderr)
         sys.exit(2)
