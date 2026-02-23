@@ -166,7 +166,7 @@ Examples:
 - Error: used --label "feature" but labels are case-sensitive → patch_type: "add_note_after", section_heading: "Labels", anchor_text: "--label", new_content: "> **Labels are case-sensitive.** Use exact casing: `Feature`, `Bug`, `Improvement`."
 
 PERMISSION MODEL (strict):
-- CAN: create_konban_task (tagged [daemon]), log_konban_task, done_konban_task (HIGH confidence only), create_brain_doc, enrich_brain_doc, update_konban_task (title/due date only), fix_skill, no_action
+- CAN: create_konban_task (tagged [daemon]), create_linear_issue (dev tasks), log_konban_task, done_konban_task (HIGH confidence only), create_brain_doc, enrich_brain_doc, update_konban_task (title/due date only), fix_skill, no_action
 - CANNOT: delete anything, modify Active Context, send external comms
 
 DOMAIN ROUTING (critical — route dev tasks to Linear, not Konban):
@@ -193,7 +193,7 @@ Return ONLY valid JSON:
 {
   "proposed_actions": [
     {
-      "type": "create_konban_task | log_konban_task | done_konban_task | update_konban_task | create_brain_doc | enrich_brain_doc | fix_skill | no_action",
+      "type": "create_konban_task | create_linear_issue | log_konban_task | done_konban_task | update_konban_task | create_brain_doc | enrich_brain_doc | fix_skill | no_action",
       "title": "task or doc title (for create actions)",
       "target": "existing doc or task name (for enrich/log actions)",
       "section_name": "heading for the new section (for enrich_brain_doc only, e.g. 'User Interview Findings')",
@@ -509,11 +509,37 @@ def call_state_consistency_check(system_state: str, model: str = DEFAULT_MODEL) 
         return {"stale_items": [], "summary": "Parse failed"}
 
 
+def _build_domain_preamble(artifacts_json: str) -> str:
+    """Build a preamble highlighting each artifact's domain and routing rules."""
+    try:
+        artifacts = json.loads(artifacts_json) if isinstance(artifacts_json, str) else artifacts_json
+    except (json.JSONDecodeError, TypeError):
+        return ""
+
+    lines = ["DOMAIN ROUTING SUMMARY FOR THIS BATCH:"]
+    for i, a in enumerate(artifacts, 1):
+        domain = a.get("_meta", {}).get("domain") or a.get("domain", "unknown")
+        atype = a.get("type", "unknown")
+        title = a.get("title", "untitled")[:80]
+        lines.append(f"  [{i}] domain={domain} type={atype} — \"{title}\"")
+
+    lines.append("")
+    lines.append("Routing reminders:")
+    lines.append("  - KH domain + dev keywords → create_linear_issue (NOT create_konban_task)")
+    lines.append("  - Non-KH domains → NO create_brain_doc (Brain is KH-only)")
+    lines.append("  - CEO-level actions only → create_konban_task")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def call_reconciliation_model(artifacts_json: str, system_state: str, model: str = DEFAULT_MODEL) -> dict:
     """Call GLM-5 to reconcile artifacts against system state."""
     api_key = get_api_key()
 
+    domain_preamble = _build_domain_preamble(artifacts_json)
+
     user_content = (
+        f"{domain_preamble}"
         "Reconcile these artifacts against the current system state.\n\n"
         f"<artifacts>\n{artifacts_json}\n</artifacts>\n\n"
         f"<system_state>\n{system_state}\n</system_state>\n\n"

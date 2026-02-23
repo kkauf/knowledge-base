@@ -161,6 +161,12 @@ Generated: {timestamp}
 
 ## Active Commitments (Konban Board)
 
+NOTE: The Konban board tracks CEO-level tasks across domains: KH (Kaufmann Health),
+Personal, Consulting, MBA. Implementation-level dev tasks (code changes, components,
+APIs) belong in Linear (KH's issue tracker), NOT here. When extracting artifacts:
+- KH domain + dev keywords → route to Linear (create_linear_issue)
+- CEO-level actions (decisions, contacts, documents, meetings) → Konban (create_konban_task)
+
 These are things being actively tracked. When conversations reference these commitments,
 the following are EXTRACTABLE (not ephemeral):
 - Scheduling decisions: "moved X to Tuesday", "rescheduling Y to next week"

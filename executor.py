@@ -46,6 +46,7 @@ BRAIN_SCRIPT = get_brain_script()
 
 ALLOWED_ACTIONS = {
     "create_konban_task",   # Create new task (pending, tagged [daemon])
+    "create_linear_issue",  # Create Linear issue for KH dev tasks (tagged [daemon])
     "log_konban_task",      # Append log entry to existing task
     "update_konban_task",   # Update task metadata (title, due date) — Tier 1
     "create_brain_doc",     # Create new Brain doc under a section
@@ -114,6 +115,10 @@ def check_permission(action: dict) -> tuple[bool, str]:
     if action_type == "create_konban_task":
         if not action.get("title"):
             return False, "DENIED: create_konban_task requires a title"
+
+    if action_type == "create_linear_issue":
+        if not action.get("title"):
+            return False, "DENIED: create_linear_issue requires a title"
 
     if action_type == "log_konban_task":
         if not action.get("task_id") and not action.get("target"):
@@ -206,10 +211,64 @@ def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
     return result
 
 
+def execute_create_linear_issue(action: dict, dry_run: bool) -> dict:
+    """Create a Linear issue for KH dev tasks."""
+    linear_script = get_skills_dir() / "linear" / "linear-api.py"
+    if not linear_script.exists():
+        return {"status": "failed", "reason": f"Linear script not available at {linear_script}"}
+
+    title = action.get("title") or action.get("target", "Untitled")
+    # Tag all daemon-created issues
+    if "[daemon]" not in title:
+        title = f"[daemon] {title}"
+
+    # Map priority: string → int (Linear uses 0-4)
+    priority_raw = action.get("priority", "3")  # Default Medium
+    priority_map = {"urgent": "1", "high": "2", "medium": "3", "low": "4", "none": "0"}
+    if isinstance(priority_raw, str) and priority_raw.lower() in priority_map:
+        priority = priority_map[priority_raw.lower()]
+    else:
+        priority = str(priority_raw) if str(priority_raw) in ("0", "1", "2", "3", "4") else "3"
+
+    status = action.get("status", "backlog")
+    label = action.get("label", "Feature")
+    description = action.get("content") or action.get("description", "")
+    source = action.get("source_artifact", "unknown")
+
+    # Append source info to description
+    if description:
+        description = f"{description}\n\n[daemon] Source: {source}"
+    else:
+        description = f"[daemon] Source: {source}"
+
+    cmd = ["python3", str(linear_script), "create", title,
+           "--priority", priority, "--status", status, "--label", label,
+           "--description", description]
+
+    if dry_run:
+        return {"status": "dry_run", "command": " ".join(cmd)}
+
+    exit_code, stdout, stderr = run_command(cmd, timeout=30)
+    result = {"status": "success" if exit_code == 0 else "failed",
+              "exit_code": exit_code, "title": title}
+    if stdout:
+        result["output"] = stdout
+    if stderr:
+        result["error"] = stderr
+    return result
+
+
 def execute_log_konban_task(action: dict, dry_run: bool) -> dict:
     """Log a message on an existing Konban task."""
     if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
         return {"status": "failed", "reason": "Konban script not available"}
+
+    # Domain guard: only Konban-appropriate domains
+    domain = action.get("domain", "")
+    if domain and domain not in ("Personal", "KH", "Consulting", "MBA", ""):
+        return {"status": "skipped",
+                "reason": f"log_konban_task skipped — domain '{domain}' is not a Konban domain"}
+
     task_id = action.get("task_id", "")
     target = action.get("target", "")
     content = action.get("content", "")
@@ -308,6 +367,13 @@ def execute_update_konban_task(action: dict, dry_run: bool) -> dict:
     """Update a Konban task's metadata (title, due date, priority, timebox)."""
     if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
         return {"status": "failed", "reason": "Konban script not available"}
+
+    # Domain guard: only Konban-appropriate domains
+    domain = action.get("domain", "")
+    if domain and domain not in ("Personal", "KH", "Consulting", "MBA", ""):
+        return {"status": "skipped",
+                "reason": f"update_konban_task skipped — domain '{domain}' is not a Konban domain"}
+
     task_id = action.get("task_id", "")
     target = action.get("target", "")
     source = action.get("source_artifact", "unknown")
@@ -655,6 +721,7 @@ def execute_fix_skill(action: dict, dry_run: bool) -> dict:
 # Action type → executor function
 EXECUTORS = {
     "create_konban_task": execute_create_konban_task,
+    "create_linear_issue": execute_create_linear_issue,
     "log_konban_task": execute_log_konban_task,
     "update_konban_task": execute_update_konban_task,
     "done_konban_task": execute_done_konban_task,
@@ -920,6 +987,7 @@ def generate_review(report: dict = None) -> str:
     results = report.get("results", [])
     created_docs = [r for r in results if r.get("action") == "create_brain_doc" and r.get("status") == "success"]
     created_tasks = [r for r in results if r.get("action") == "create_konban_task" and r.get("status") == "success"]
+    created_issues = [r for r in results if r.get("action") == "create_linear_issue" and r.get("status") == "success"]
     enriched = [r for r in results if r.get("action") == "enrich_brain_doc" and r.get("status") == "success"]
     logged = [r for r in results if r.get("action") == "log_konban_task" and r.get("status") == "success"]
     done_tasks = [r for r in results if r.get("action") == "done_konban_task" and r.get("status") == "success"]
@@ -933,6 +1001,8 @@ def generate_review(report: dict = None) -> str:
         parts.append(f"{len(created_docs)} Brain docs created")
     if created_tasks:
         parts.append(f"{len(created_tasks)} Konban tasks created")
+    if created_issues:
+        parts.append(f"{len(created_issues)} Linear issues created")
     if enriched:
         parts.append(f"{len(enriched)} Brain docs enriched")
     if logged:
@@ -970,6 +1040,16 @@ def generate_review(report: dict = None) -> str:
         for r in created_tasks:
             label = r.get("target") or r.get("title") or "?"
             lines.append(f"  [+] {label}")
+        lines.append("")
+
+    # DONE: Linear issues created
+    if created_issues:
+        lines.append("**Linear issues created** (spot-check):")
+        for r in created_issues:
+            label = r.get("target") or r.get("title") or "?"
+            lines.append(f"  [+] {label}")
+            if r.get("output"):
+                lines.append(f"      → {r['output'][:80]}")
         lines.append("")
 
     # DONE: Tasks marked done
