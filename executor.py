@@ -813,6 +813,56 @@ def execute_plan(plan: dict, dry_run: bool = False) -> dict:
     return report
 
 
+def _format_action_label(r: dict) -> str:
+    """Build a readable label for a reconciliation action result."""
+    action = r.get("action", "?")
+    target = r.get("target", "")
+    title = r.get("title", "")
+    rationale = r.get("rationale", "")
+
+    # Use best available description
+    label = target or title or rationale[:80] or "?"
+    if label == "?" and r.get("output"):
+        label = r["output"][:80]
+
+    return f"{action}: {label}"
+
+
+def _load_kb_extraction_stats() -> list:
+    """Load recent KB extraction stats from daemon log for standup context."""
+    daemon_log = KB_DIR / "extract.log"
+    if not daemon_log.exists():
+        return []
+
+    lines = []
+    try:
+        log_lines = daemon_log.read_text().strip().splitlines()
+        # Find the most recent "Done:" summary line
+        for line in reversed(log_lines):
+            if "Done:" in line and "extracted" in line:
+                lines.append(f"  Last daemon run: {line.strip()}")
+                break
+    except OSError:
+        pass
+
+    # Check KB status for entity/fact counts
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            ["python3", str(KB_DIR / "kb.py"), "status"],
+            capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.splitlines():
+            if "DB:" in line:
+                lines.append(f"  {line.strip()}")
+            elif "superseded" in line.lower():
+                lines.append(f"  {line.strip()}")
+    except Exception:
+        pass
+
+    return lines
+
+
 def generate_review(report: dict = None) -> str:
     """Generate a review summary for morning standup.
 
@@ -829,28 +879,104 @@ def generate_review(report: dict = None) -> str:
         "",
     ]
 
-    # Summary line
+    # Summary counts
     executed = report.get("actions_executed", 0)
     deferred = report.get("actions_deferred", 0)
     denied = report.get("actions_denied", 0)
     failed = report.get("actions_failed", 0)
-    lines.append(f"**{executed} auto-executed, {deferred} for your review, "
-                 f"{denied} denied, {failed} failed**")
+
+    # Categorize results for readable summary
+    results = report.get("results", [])
+    created_docs = [r for r in results if r.get("action") == "create_brain_doc" and r.get("status") == "success"]
+    created_tasks = [r for r in results if r.get("action") == "create_konban_task" and r.get("status") == "success"]
+    enriched = [r for r in results if r.get("action") == "enrich_brain_doc" and r.get("status") == "success"]
+    logged = [r for r in results if r.get("action") == "log_konban_task" and r.get("status") == "success"]
+    done_tasks = [r for r in results if r.get("action") == "done_konban_task" and r.get("status") == "success"]
+    updated_tasks = [r for r in results if r.get("action") == "update_konban_task" and r.get("status") == "success"]
+    skill_fixes = [r for r in results if r.get("action") == "fix_skill" and r.get("status") == "success"]
+    no_actions = [r for r in results if r.get("status") == "no_action"]
+
+    # One-line summary
+    parts = []
+    if created_docs:
+        parts.append(f"{len(created_docs)} Brain docs created")
+    if created_tasks:
+        parts.append(f"{len(created_tasks)} Konban tasks created")
+    if enriched:
+        parts.append(f"{len(enriched)} Brain docs enriched")
+    if logged:
+        parts.append(f"{len(logged)} task logs added")
+    if done_tasks:
+        parts.append(f"{len(done_tasks)} tasks marked done")
+    if updated_tasks:
+        parts.append(f"{len(updated_tasks)} tasks updated")
+    if skill_fixes:
+        parts.append(f"{len(skill_fixes)} skill docs fixed")
+    if no_actions:
+        parts.append(f"{len(no_actions)} already current")
+
+    if parts:
+        lines.append(f"**Summary**: {', '.join(parts)}")
+    else:
+        lines.append(f"**{executed} auto-executed, {deferred} for your review**")
+    if failed:
+        lines.append(f"  ({failed} failed — see below)")
     lines.append("")
 
-    # DONE section (auto-executed, spot-check)
-    auto_results = [r for r in report.get("results", [])
-                    if r.get("status") in ("success", "dry_run", "no_action", "proposed")]
-    if auto_results:
-        lines.append("**DONE** (spot-check if wrong):")
-        for r in auto_results:
-            status_icon = {"success": "+", "dry_run": "~", "no_action": ".",
-                           "proposed": "?"}.get(r.get("status"), "?")
-            lines.append(f"  [{status_icon}] {r['action']}: {r['target']}")
+    # DONE: Brain docs created (most valuable to know about)
+    if created_docs:
+        lines.append("**Brain docs created** (spot-check):")
+        for r in created_docs:
+            label = r.get("target") or r.get("title") or "?"
+            lines.append(f"  [+] {label}")
             if r.get("page_id"):
-                lines.append(f"      → Created: {r['page_id']}")
-            if r.get("output"):
-                lines.append(f"      → {r['output'][:100]}")
+                lines.append(f"      → {r['page_id'][:40]}")
+        lines.append("")
+
+    # DONE: Konban tasks created
+    if created_tasks:
+        lines.append("**Konban tasks created** (spot-check):")
+        for r in created_tasks:
+            label = r.get("target") or r.get("title") or "?"
+            lines.append(f"  [+] {label}")
+        lines.append("")
+
+    # DONE: Tasks marked done
+    if done_tasks:
+        lines.append("**Tasks marked done**:")
+        for r in done_tasks:
+            lines.append(f"  [✓] {r.get('target', '?')}")
+        lines.append("")
+
+    # DONE: Tasks updated
+    if updated_tasks:
+        lines.append("**Tasks updated**:")
+        for r in updated_tasks:
+            label = r.get("target") or r.get("title") or "?"
+            msg = r.get("message", r.get("output", ""))
+            lines.append(f"  [~] {label}")
+            if msg:
+                lines.append(f"      → {str(msg)[:100]}")
+        lines.append("")
+
+    # DONE: Enrichments and logs (lower priority, compact)
+    other_done = enriched + logged
+    if other_done:
+        lines.append("**Other updates**:")
+        for r in other_done:
+            lines.append(f"  [{'+' if r.get('status') == 'success' else '.'}] "
+                         f"{_format_action_label(r)}")
+        lines.append("")
+
+    # Skill docs auto-fixed
+    if skill_fixes:
+        lines.append("**Skill docs auto-updated** (verify correctness):")
+        for r in skill_fixes:
+            skill_name = r.get("target") or r.get("skill", "?")
+            msg = r.get("message", r.get("output", ""))
+            lines.append(f"  [+] {skill_name}")
+            if msg:
+                lines.append(f"      → {str(msg)[:120]}")
         lines.append("")
 
     # YOUR CALL section (deferred proposals)
@@ -858,63 +984,53 @@ def generate_review(report: dict = None) -> str:
     if proposals:
         lines.append("**YOUR CALL** (approve or dismiss):")
         for i, p in enumerate(proposals, 1):
-            lines.append(f"  [{i}] {p['action']}: {p['target']}")
+            label = p.get("target") or p.get("title") or "?"
+            lines.append(f"  [{i}] {p['action']}: {label}")
             if p.get("rationale"):
-                lines.append(f"      → {p['rationale'][:120]}")
-            if p.get("content"):
-                lines.append(f"      Evidence: {p['content'][:100]}")
+                lines.append(f"      → {p['rationale'][:150]}")
         lines.append("")
 
-    # Conflicts
-    if report.get("conflicts_detail"):
-        lines.append(f"**Conflicts flagged** ({report['conflicts']}):")
-        for c in report["conflicts_detail"]:
-            lines.append(f"  - {c.get('artifact', '?')} vs {c.get('conflicts_with', '?')}")
-            lines.append(f"    → {c.get('recommendation', 'review needed')}")
+    # Conflicts (stale state)
+    conflicts_detail = report.get("conflicts_detail", [])
+    if conflicts_detail:
+        lines.append(f"**Stale state detected** ({len(conflicts_detail)} items):")
+        for c in conflicts_detail:
+            what = c.get("conflicts_with", c.get("artifact", "?"))
+            rec = c.get("recommendation", "review needed")
+            lines.append(f"  - {what}")
+            lines.append(f"    → {rec[:150]}")
         lines.append("")
 
-    # Auto-applied skill fixes (from this run)
-    auto_applied = [r for r in report.get("results", [])
-                    if r.get("action") == "fix_skill" and r.get("auto_applied")]
-    if auto_applied:
-        lines.append("**Skill docs auto-updated** (verify correctness):")
-        for r in auto_applied:
-            lines.append(f"  [+] {r.get('target', '?')}: {r.get('message', '')}")
-        lines.append("")
-
-    # Pending skill fixes (proposals)
-    skill_fixes = KB_DIR / "skill-fixes-pending.json"
-    if skill_fixes.exists():
+    # Pending skill fixes (proposals from previous runs)
+    skill_fixes_file = KB_DIR / "skill-fixes-pending.json"
+    if skill_fixes_file.exists():
         try:
-            fixes = json.loads(skill_fixes.read_text())
-            if fixes:
-                lines.append(f"**Skill fixes pending review** ({len(fixes)}):")
-                for i, fix in enumerate(fixes, 1):
+            pending_fixes = json.loads(skill_fixes_file.read_text())
+            if pending_fixes:
+                lines.append(f"**Skill fixes pending review** ({len(pending_fixes)}):")
+                for i, fix in enumerate(pending_fixes, 1):
                     skill = fix.get('skill', '?')
-                    patch_type = fix.get('patch_type', '?')
-                    section = fix.get('section_heading', '')
-                    content_preview = fix.get('new_content', fix.get('proposed_change', ''))[:80]
-                    lines.append(f"  [{i}] {skill} ({patch_type})")
-                    if section:
-                        lines.append(f"      Section: {section}")
-                    lines.append(f"      Content: {content_preview}")
-                    if fix.get('rationale'):
-                        lines.append(f"      Why: {fix['rationale'][:100]}")
-                lines.append("")
-                lines.append("  Use `pipeline.py --show-skill-fixes` to see full details")
-                lines.append("  Use `pipeline.py --apply-skill-fix all` to apply approved fixes")
+                    change = fix.get('proposed_change', fix.get('new_content', ''))[:80]
+                    lines.append(f"  [{i}] {skill}: {change}")
                 lines.append("")
         except json.JSONDecodeError:
             pass
 
     # Failed actions
-    failed_results = [r for r in report.get("results", []) if r.get("status") == "failed"]
+    failed_results = [r for r in results if r.get("status") == "failed"]
     if failed_results:
         lines.append("**Failed** (investigate):")
         for r in failed_results:
-            lines.append(f"  [!] {r['action']}: {r['target']}")
+            lines.append(f"  [!] {_format_action_label(r)}")
             if r.get("error"):
                 lines.append(f"      → {r['error'][:100]}")
+        lines.append("")
+
+    # KB extraction stats (what the daemon learned overnight)
+    kb_stats = _load_kb_extraction_stats()
+    if kb_stats:
+        lines.append("**KB extraction stats**:")
+        lines.extend(kb_stats)
         lines.append("")
 
     review = "\n".join(lines)
