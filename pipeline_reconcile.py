@@ -169,6 +169,13 @@ PERMISSION MODEL (strict):
 - CAN: create_konban_task (tagged [daemon]), log_konban_task, done_konban_task (HIGH confidence only), create_brain_doc, enrich_brain_doc, update_konban_task (title/due date only), fix_skill, no_action
 - CANNOT: delete anything, modify Active Context, send external comms
 
+DOMAIN ROUTING (critical — route dev tasks to Linear, not Konban):
+- KH domain + dev-related keywords (component, endpoint, API, schema, refactor, dialog, form, view, tab, button, test, migration, hook, CSS, layout, route, query, mutation, resolver, seed, fixture) → create_linear_issue (NOT create_konban_task)
+- Only well-scoped, implementation-ready dev tasks → Linear. Vague/strategic items → Brain doc or no_action.
+- create_linear_issue fields: title (imperative, short), priority (1=Urgent, 2=High, 3=Medium, 4=Low), status (default "backlog"), label (default "Feature"), description (1-3 sentences of context)
+- CEO-level tasks (decisions, people to contact, documents to write, meetings, deadlines) → create_konban_task
+- When in doubt between Linear and Konban, prefer Linear for anything that involves code changes.
+
 DONE_KONBAN_TASK rules:
 - Only propose done_konban_task when evidence is EXPLICIT: "shipped", "deployed", "committed", "sent", "done", or you see the actual tool call (konban done, git push) in the transcript.
 - Git commits are the STRONGEST done signal. A commit message like "fix(portal): accept 4-5 digit postal codes" + a Konban task "PLZ validation fix" = high confidence done. Commits prefixed with "Ship:" indicate production deployment.
@@ -389,6 +396,11 @@ You receive the CURRENT STATE of the user's system: Active Context (strategic pr
 
 Your job: find items in Active Context or Konban that are stale — the work they describe is already done (fully or partially) based on git commit evidence.
 
+CRITICAL RULE: Only flag items that LITERALLY EXIST in the provided data. Do NOT infer or invent tasks.
+- For Konban: only flag tasks that appear in the Konban board text with a task title and ID
+- For Active Context: only flag priorities/milestones that are explicitly listed
+- NEVER create phantom items from mentions of shipped features
+
 PROCEDURE — follow these steps:
 1. List each Active Context priority/milestone and each Konban "Doing"/"To Do" task
 2. For each item, scan ALL git commits for semantic matches (not just keyword matches)
@@ -422,7 +434,7 @@ Return ONLY valid JSON:
   "stale_items": [
     {
       "source": "active_context | konban",
-      "item": "what's claimed as in-progress or planned",
+      "item": "exact item text from the provided data",
       "status": "completed | partially_completed",
       "evidence": "git commit hash(es) and what they did",
       "remaining": "what sub-items are NOT yet done (null if fully completed)",
@@ -432,7 +444,7 @@ Return ONLY valid JSON:
   "summary": "1 sentence summary"
 }
 
-If nothing is stale, return empty stale_items array. But be thorough — missing a stale item means the user wastes attention on work that's already done."""
+If nothing is stale, return empty stale_items array. Be thorough but PRECISE — only flag items you can quote from the provided data."""
 
 
 # --- Model calls ---
