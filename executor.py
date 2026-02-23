@@ -1016,7 +1016,6 @@ def generate_review(report: dict = None) -> str:
             # Extract just the action (after last —) for brevity
             parts = rec.split(" — ")
             action = parts[-1] if len(parts) > 1 else rec
-            evidence = parts[0] if len(parts) > 1 else ""
             lines.append(f"  - {what}")
             lines.append(f"    → {action}")
         lines.append("")
