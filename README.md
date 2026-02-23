@@ -287,7 +287,9 @@ The reconciliation pipeline can optionally create tasks and documents in externa
 }
 ```
 
-These scripts must accept specific subcommands (`create`, `log`, `done`, `read`, `list`). Without them, the pipeline still works — it just extracts and reports instead of taking actions.
+These scripts must implement a specific interface. See the [adapter interface spec](docs/adapter-interface.md) for the full contract. Without them, the pipeline still works — it just extracts and reports instead of taking actions.
+
+A Notion-based reference implementation is available: [claude-notion](https://github.com/kkauf/claude-notion).
 
 ## Models and Cost
 
@@ -351,6 +353,7 @@ For those who want to understand or contribute:
 - [ADR-002: Information Architecture](docs/ADR-002-information-architecture.md) — Entity/fact/relation data model
 - [ADR-003: Domain-Aware Extraction](docs/ADR-003-domain-aware-extraction.md) — Context injection, domain routing
 - [ADR-004: Reconciliation Pipeline](docs/ADR-004-reconciliation-pipeline.md) — Full pipeline architecture, permission model, skill improvement
+- [Adapter Interface](docs/adapter-interface.md) — How to write external tool adapters (task board, docs)
 
 ## License
 
