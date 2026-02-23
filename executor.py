@@ -159,6 +159,15 @@ def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
     if "[daemon]" not in title:
         title = f"[daemon] {title}"
 
+    # Domain guard: skip implementation-level dev tasks (belong in Linear, not Konban)
+    domain = action.get("domain", "")
+    dev_keywords = {"component", "endpoint", "api", "schema", "refactor", "dialog",
+                    "form", "view", "tab", "button", "test", "migration", "hook"}
+    title_words = set(title.lower().split())
+    if domain == "KH" and title_words & dev_keywords:
+        return {"status": "skipped", "reason": f"Dev task routed away from Konban (domain={domain})",
+                "title": title}
+
     priority = action.get("priority", "Medium")
     timebox = action.get("timebox")
 
@@ -365,6 +374,12 @@ def execute_create_brain_doc(action: dict, dry_run: bool) -> dict:
     source = action.get("source_artifact", "unknown")
     section = action.get("section", "Research")  # Default to Research for daemon-created docs
     domain = action.get("domain")
+
+    # Domain guard: Brain is KH-only. Other domains have their own docs.
+    if domain and domain not in ("KH", None):
+        return {"status": "skipped",
+                "reason": f"Brain doc skipped — domain '{domain}' is not KH",
+                "title": title}
 
     # Add daemon header
     full_content = f"*Created by reconciliation daemon — source: {source}*\n\n{content}"

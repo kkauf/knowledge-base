@@ -83,6 +83,7 @@ ENRICHMENT vs CREATION decision:
 - If the artifact is a genuinely new TOPIC not covered by any existing doc, use create_brain_doc.
 - Enrichment is additive only — it appends a new section, never modifies existing content.
 - When enriching, choose a section_name that describes what's being added (e.g., "SaaS Product Implications", "Pre-Booking Gap Analysis").
+- Only create_brain_doc for KH domain knowledge. If the artifact domain is VSS, Infrastructure, IsAI, or Personal, skip brain doc creation — those projects have their own documentation.
 
 STALENESS CHECK (critical):
 - Artifacts come from conversation transcripts that may be hours or days old.
@@ -128,6 +129,7 @@ For decomposed Konban tasks:
 - Content: 1-3 sentences of relevant reasoning from the artifact (why this matters)
 - Priority: based on artifact confidence levels and urgency
 - brain_doc: title of the companion Brain doc
+- NEVER create_konban_task for implementation-level code changes (components, APIs, endpoints, schemas, tests, refactors). Those belong in the project's issue tracker (Linear), not the personal Kanban. Only create_konban_task for CEO-level actions: decisions to make, people to contact, documents to write, meetings to schedule, deadlines to meet.
 
 CONFIDENCE SCORING (required on every action):
 Every action MUST include a "confidence" field: "high", "medium", or "low".
@@ -266,8 +268,8 @@ def load_git_history(days: int = 7) -> str:
         if not (repo / ".git").exists():
             continue
         output = run_cmd(
-            ["git", "-C", str(repo), "log", "--oneline", f"--since={days} days ago",
-             "--no-merges", "--format=%h %s (%ar)"],
+            ["git", "-C", str(repo), "log", "--all", "--oneline", f"--since={days} days ago",
+             "--no-merges", "--decorate=short", "--format=%h %d %s (%ar)"],
             timeout=15,
         )
         if output:
