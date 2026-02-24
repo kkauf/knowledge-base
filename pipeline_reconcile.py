@@ -75,6 +75,11 @@ RULES:
   * If the constraint IS already documented in SKILL.md and Claude ignored it → no_action (optionally note "already documented")
   * If the constraint is genuinely MISSING from SKILL.md → propose fix_skill with a STRUCTURED PATCH
   * If the error is a helper script bug (not a docs issue) → propose fix_skill with patch_type "report_bug"
+  * Cross-tool error_types and their routing:
+    - source_reading, skill_inspection → fix_skill (patch_type: append_to_section or add_new_section) — add missing info to SKILL.md
+    - escalation_cascade → fix_skill (patch_type: report_bug) — helper script needs a new capability
+    - output_truncation → fix_skill (patch_type: report_bug) — helper script truncates needed data
+    - identical_retry → context-dependent: if corroborated, route to appropriate fix; standalone → document expected output in SKILL.md
 - Be conservative — when in doubt, propose no_action rather than creating noise
 
 ENRICHMENT vs CREATION decision:

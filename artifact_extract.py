@@ -100,6 +100,11 @@ Also identify ERROR PATTERNS: places where the assistant used a tool suboptimall
 - Soft misses: "project not found", "no active tasks matching X" then retrying with different name
 - Discovery calls: running --help or bare command to learn the API (means SKILL.md was insufficient)
 - Parameter hunting: multiple retries with slightly different args until one works
+- Source code reading: Claude READ the helper script source code (means SKILL.md was insufficient)
+- Identical retries: Same command run multiple times without changes (tool output was insufficient)
+- Escalation cascades: Skill helper → raw curl/urllib/API calls (skill couldn't do what was needed)
+- Output truncation: Tool returned short/clipped output, then Claude tried workarounds (script truncates data)
+- Skill inspection: Claude searched/grepped the skill directory to understand capabilities (SKILL.md gap)
 
 These are ALL skill improvement signals — each wasted call is a SKILL.md doc gap.
 
@@ -145,6 +150,7 @@ For error_patterns:
 - "error_type": classify the issue:
   * Hard errors: wrong_arg_type (string where int expected), invalid_value ("High" when "3" needed), case_sensitivity ("feature" vs "Feature"), missing_flag (flag doesn't exist)
   * Inefficiencies: inefficient_lookup (searched for wrong name/entity, "not found" then retry), discovery_call (ran --help or bare command to discover API — SKILL.md was insufficient)
+  * Cross-tool patterns: source_reading (Read of helper .py source), identical_retry (same command repeated), escalation_cascade (skill → raw API fallback), output_truncation (short output + workaround attempts), skill_inspection (Grep/Glob of skill directory)
   * Fallback: other
 - "correct_usage": the CORRECT way to invoke the command (from the successful retry or your analysis). For inefficient_lookup, include the correct entity name/search term.
 - "doc_gap": true if this issue is likely because the SKILL.md documentation is missing or unclear about this constraint (e.g., valid project names, exact entity names, API shape). false if the info is probably already documented and Claude just ignored it.

@@ -438,6 +438,23 @@ _SKILL_HELPER_RE = re.compile(
     re.DOTALL,
 )
 
+# Pattern to match skill helper file paths in Read tool calls
+_SKILL_FILE_RE = re.compile(
+    r'(?:~|/Users/\w+)/\.claude/skills/([^/]+)/([^\s]+\.py)',
+)
+
+# Pattern to match skill directory paths in Grep/Glob calls
+_SKILL_DIR_RE = re.compile(
+    r'(?:~|/Users/\w+)/\.claude/skills/?',
+)
+
+# Patterns for raw API calls that bypass skill helpers
+_RAW_API_PATTERNS = {
+    "linear": re.compile(r'api\.linear\.app|LINEAR_API_KEY', re.IGNORECASE),
+    "notion": re.compile(r'api\.notion\.com|NOTION_TOKEN', re.IGNORECASE),
+    "gcal": re.compile(r'googleapis\.com/calendar|GOOGLE_', re.IGNORECASE),
+}
+
 
 def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dict]:
     """Parse tool_use + tool_result blocks to find suboptimal skill helper calls.
@@ -506,20 +523,12 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
                     }
                     block_index += 1
 
-    # Step 2: Match Bash calls to skill helpers and classify each call
-    skill_calls = []  # ordered list of {skill, script, command, result, issue, order}
+    # Step 2: Index all relevant tool calls across tool types
+    skill_calls = []       # Bash calls to skill helpers
+    raw_api_calls = []     # Bash calls hitting APIs directly (bypassing helpers)
+    skill_inspections = [] # Read/Grep/Glob targeting skill source code
 
     for tool_id, call in sorted(tool_calls.items(), key=lambda x: x[1]["order"]):
-        if call["name"] != "Bash":
-            continue
-        command = call["input"].get("command", "")
-        match = _SKILL_HELPER_RE.search(command)
-        if not match:
-            continue
-
-        skill_name = match.group(1)
-        script_name = match.group(2)
-        args_text = match.group(3).strip()
         result = tool_results.get(tool_id, {})
         result_text = result.get("content", "")
         if isinstance(result_text, list):
@@ -528,33 +537,82 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
                 if isinstance(b, dict) and b.get("type") == "text"
             )
 
-        result_lower = result_text.lower()
+        if call["name"] == "Bash":
+            command = call["input"].get("command", "")
+            match = _SKILL_HELPER_RE.search(command)
+            if match:
+                skill_name = match.group(1)
+                script_name = match.group(2)
+                args_text = match.group(3).strip()
+                result_lower = result_text.lower()
 
-        # Classify: hard error, soft miss, discovery call, or clean
-        issue = None
-        if any(indicator in result_lower for indicator in [
-            "error:", "traceback", "exception", "failed",
-            "invalid", "unrecognized",
-        ]):
-            issue = "error"
-        elif any(indicator in result_lower for indicator in [
-            "not found", "no active tasks", "no matching",
-            "no results", "does not exist", "0 results",
-        ]):
-            issue = "soft_miss"
-        elif "--help" in command or (args_text and args_text.startswith("2>&1")):
-            issue = "discovery"
-        elif "usage:" in result_lower and not args_text:
-            issue = "discovery"
+                # Classify: hard error, soft miss, discovery call, or clean
+                issue = None
+                if any(indicator in result_lower for indicator in [
+                    "error:", "traceback", "exception", "failed",
+                    "invalid", "unrecognized",
+                ]):
+                    issue = "error"
+                elif any(indicator in result_lower for indicator in [
+                    "not found", "no active tasks", "no matching",
+                    "no results", "does not exist", "0 results",
+                ]):
+                    issue = "soft_miss"
+                elif "--help" in command or (args_text and args_text.startswith("2>&1")):
+                    issue = "discovery"
+                elif "usage:" in result_lower and not args_text:
+                    issue = "discovery"
 
-        skill_calls.append({
-            "skill": skill_name,
-            "script": script_name,
-            "command": command,
-            "result": result_text[:2000],  # Truncate long results
-            "issue": issue,
-            "order": call["order"],
-        })
+                skill_calls.append({
+                    "skill": skill_name,
+                    "script": script_name,
+                    "command": command,
+                    "result": result_text[:2000],
+                    "issue": issue,
+                    "order": call["order"],
+                })
+            else:
+                # Check for raw API calls (bypassing skill helpers)
+                for service, pattern in _RAW_API_PATTERNS.items():
+                    if pattern.search(command):
+                        raw_api_calls.append({
+                            "service": service,
+                            "command": command,
+                            "result": result_text[:2000],
+                            "order": call["order"],
+                        })
+                        break
+
+        elif call["name"] == "Read":
+            file_path = call["input"].get("file_path", "")
+            match = _SKILL_FILE_RE.search(file_path)
+            if match:
+                skill_inspections.append({
+                    "type": "source_reading",
+                    "skill": match.group(1),
+                    "script": match.group(2),
+                    "path": file_path,
+                    "order": call["order"],
+                })
+
+        elif call["name"] in ("Grep", "Glob"):
+            path = call["input"].get("path", "") or call["input"].get("pattern", "")
+            if _SKILL_DIR_RE.search(path):
+                skill_name = None
+                skill_match = _SKILL_FILE_RE.search(path)
+                if skill_match:
+                    skill_name = skill_match.group(1)
+                else:
+                    # Extract skill name from directory path (e.g., .claude/skills/linear)
+                    dir_match = re.search(r'/\.claude/skills/([^/\s]+)', path)
+                    if dir_match:
+                        skill_name = dir_match.group(1)
+                skill_inspections.append({
+                    "type": "skill_search",
+                    "skill": skill_name,
+                    "path": path,
+                    "order": call["order"],
+                })
 
     # Step 3: Group into suboptimal → retry sequences per skill+script
     # Catches both hard errors and inefficient patterns (soft misses, discovery calls)
@@ -599,6 +657,98 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
         # Skip past the sequence we just processed
         i = j + 1 if j < len(skill_calls) else i + 1
 
+    # Step 4: Detect cross-tool patterns (source reading, escalation, etc.)
+    # These track how Claude escalated beyond skill helpers when they were insufficient.
+
+    # Pattern 1 — Source Code Reading: Read of a skill helper .py file
+    for insp in skill_inspections:
+        if insp["type"] != "source_reading":
+            continue
+        # Look backward for a preceding skill call to this skill
+        preceding_call = None
+        for sc in reversed(skill_calls):
+            if sc["order"] < insp["order"] and sc["skill"] == insp["skill"]:
+                preceding_call = sc
+                break
+        error_sequences.append({
+            "skill": insp["skill"],
+            "script": insp.get("script", "SKILL.md"),
+            "failed_command": preceding_call["command"] if preceding_call else f"Read {insp['path']}",
+            "error_text": f"Claude read source code of {insp['path']} (SKILL.md was insufficient)",
+            "successful_command": None,
+            "error_type": "source_reading",
+        })
+
+    # Pattern 2 — Identical Retry: Same skill helper called with identical args,
+    # where first call was "clean" (no error detected)
+    for idx in range(1, len(skill_calls)):
+        curr = skill_calls[idx]
+        prev = skill_calls[idx - 1]
+        if (curr["skill"] == prev["skill"]
+                and curr["script"] == prev["script"]
+                and curr["command"] == prev["command"]
+                and not prev["issue"]):  # First call was "clean"
+            error_sequences.append({
+                "skill": curr["skill"],
+                "script": curr["script"],
+                "failed_command": prev["command"],
+                "error_text": f"Same command repeated (first call returned: {prev['result'][:200]})",
+                "successful_command": None,
+                "error_type": "identical_retry",
+            })
+
+    # Pattern 3 — Escalation Cascade: Skill helper → raw API call to same service
+    for raw in raw_api_calls:
+        for sc in reversed(skill_calls):
+            if sc["skill"] == raw["service"] and (raw["order"] - sc["order"]) <= 10:
+                error_sequences.append({
+                    "skill": sc["skill"],
+                    "script": sc["script"],
+                    "failed_command": sc["command"],
+                    "error_text": f"Escalated to raw API: {raw['command'][:200]}",
+                    "successful_command": raw["command"],
+                    "error_type": "escalation_cascade",
+                })
+                break
+
+    # Pattern 4 — Output Truncation: Clean skill call with suspiciously short output,
+    # corroborated by workaround attempts (Patterns 1-3) on the same skill
+    corroborated_skills = set()
+    for seq in error_sequences:
+        if seq["error_type"] in ("source_reading", "identical_retry", "escalation_cascade"):
+            corroborated_skills.add(seq["skill"])
+    for sc in skill_calls:
+        if (not sc["issue"]
+                and sc["skill"] in corroborated_skills
+                and len(sc["result"].strip()) < 300):
+            already_captured = any(
+                seq.get("successful_command") == sc["command"]
+                or seq.get("failed_command") == sc["command"]
+                for seq in error_sequences
+            )
+            if not already_captured:
+                error_sequences.append({
+                    "skill": sc["skill"],
+                    "script": sc["script"],
+                    "failed_command": sc["command"],
+                    "error_text": f"Short output ({len(sc['result'].strip())} chars) corroborated by workaround attempts",
+                    "successful_command": None,
+                    "error_type": "output_truncation",
+                })
+
+    # Pattern 5 — Skill Inspection: Grep/Glob searching the skill directory
+    for insp in skill_inspections:
+        if insp["type"] != "skill_search":
+            continue
+        error_sequences.append({
+            "skill": insp.get("skill") or "unknown",
+            "script": "SKILL.md",
+            "failed_command": f"Grep/Glob {insp['path']}",
+            "error_text": "Claude searched skill directory (SKILL.md was insufficient)",
+            "successful_command": None,
+            "error_type": "skill_inspection",
+        })
+
     return error_sequences
 
 
@@ -609,6 +759,8 @@ def _classify_error_type(failed_cmd: str, error_text: str, success_cmd: str = No
     Categories:
         Hard errors: wrong_arg_type, invalid_value, case_sensitivity, missing_flag
         Inefficiencies: inefficient_lookup, discovery_call, parameter_hunting
+        Cross-tool (set by Step 4, not this function): source_reading,
+            identical_retry, escalation_cascade, output_truncation, skill_inspection
         Fallback: other
     """
     error_lower = error_text.lower()
