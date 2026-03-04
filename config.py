@@ -202,6 +202,11 @@ def get_proposals_file() -> Path:
     return get_kb_dir() / "standup-proposals.json"
 
 
+def get_consistency_cache_file() -> Path:
+    """Path to consistency-cache.json (cached state consistency check result)."""
+    return get_kb_dir() / "consistency-cache.json"
+
+
 def get_backfill_log() -> Path:
     """Path to backfill.log."""
     return get_kb_dir() / "backfill.log"
@@ -227,6 +232,16 @@ def get_brain_script() -> Path | None:
     if path:
         return Path(_expand(path))
     fallback = get_skills_dir() / "notion-docs" / "notion-api.py"
+    return fallback if fallback.exists() else None
+
+
+def get_linear_script() -> Path | None:
+    """Path to Linear helper script, or None if not configured."""
+    config = load_config()
+    path = config.get("external_tools", {}).get("linear_script", "")
+    if path:
+        return Path(_expand(path))
+    fallback = get_skills_dir() / "linear" / "linear-api.py"
     return fallback if fallback.exists() else None
 
 

@@ -122,7 +122,8 @@ def show_status():
         print("**Last review**: none")
 
 
-def run_reconcile(dry_run: bool = False, execute: bool = False, output: str = None):
+def run_reconcile(dry_run: bool = False, execute: bool = False, output: str = None,
+                  skip_consistency: bool = False):
     """Run Stage 2 reconciliation, batching if artifact count exceeds threshold."""
     BATCH_SIZE = 15  # GLM-5 times out with >15 artifacts + system state context
 
@@ -139,15 +140,20 @@ def run_reconcile(dry_run: bool = False, execute: bool = False, output: str = No
     print("STAGE 2: Reconciliation")
     print("=" * 60)
 
-    if pending_count <= BATCH_SIZE:
-        # Small enough for a single call
+    def _build_cmd():
         cmd = ["python3", str(RECONCILE_SCRIPT)]
         if dry_run:
             cmd.append("--dry-run")
         if execute:
             cmd.append("--execute")
+        if skip_consistency:
+            cmd.append("--skip-consistency")
         if output:
             cmd.extend(["--output", output])
+        return cmd
+
+    if pending_count <= BATCH_SIZE:
+        cmd = _build_cmd()
         result = subprocess.run(cmd, timeout=600)
         return result.returncode
     else:
@@ -165,14 +171,7 @@ def run_reconcile(dry_run: bool = False, execute: bool = False, output: str = No
             # Write batch to pending file
             PENDING_FILE.write_text(json.dumps(batch, indent=2))
 
-            cmd = ["python3", str(RECONCILE_SCRIPT)]
-            if dry_run:
-                cmd.append("--dry-run")
-            if execute:
-                cmd.append("--execute")
-            if output:
-                cmd.extend(["--output", output])
-
+            cmd = _build_cmd()
             try:
                 result = subprocess.run(cmd, timeout=600)
                 if result.returncode != 0:
@@ -486,6 +485,8 @@ def main():
                         help="Apply skill fixes by index (e.g., '1,3' or 'all')")
     parser.add_argument("--dismiss-skill-fixes", action="store_true",
                         help="Dismiss all pending skill fix proposals")
+    parser.add_argument("--skip-consistency", action="store_true",
+                        help="Skip live consistency check, use cached result")
 
     args = parser.parse_args()
 
@@ -544,6 +545,7 @@ def main():
             dry_run=args.dry_run,
             execute=args.execute,
             output=output if not args.execute else None,
+            skip_consistency=args.skip_consistency,
         )
 
         if exit_code != 0:

@@ -30,6 +30,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -38,7 +39,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (get_openrouter_url, get_reconciliation_model, get_kb_dir,
                     get_pending_file, get_konban_script, get_brain_script,
-                    get_skills_dir, get_api_key, get_http_referer, get_git_repos)
+                    get_linear_script, get_skills_dir, get_api_key,
+                    get_http_referer, get_git_repos, get_consistency_cache_file)
 
 # --- Config ---
 
@@ -46,9 +48,54 @@ OPENROUTER_URL = get_openrouter_url()
 DEFAULT_MODEL = get_reconciliation_model()
 KB_DIR = get_kb_dir()
 PENDING_FILE = get_pending_file()
+TIMING_LOG = KB_DIR / "reconciliation-timing.log"
+
+
+# --- Timing ---
+
+_timings: list[tuple[str, float]] = []  # (phase_name, duration_seconds)
+_phase_start: float = 0.0
+_phase_name: str = ""
+
+
+def _start(phase: str):
+    """Mark the start of a timed phase."""
+    global _phase_start, _phase_name
+    _phase_name = phase
+    _phase_start = time.monotonic()
+    print(f"  [{phase}] started")
+
+
+def _end(extra: str = ""):
+    """Mark the end of a timed phase, record duration."""
+    global _phase_start, _phase_name
+    elapsed = time.monotonic() - _phase_start
+    _timings.append((_phase_name, elapsed))
+    suffix = f" — {extra}" if extra else ""
+    print(f"  [{_phase_name}] {elapsed:.1f}s{suffix}")
+    _phase_name = ""
+    _phase_start = 0.0
+
+
+def _write_timing_log(exit_reason: str = "ok"):
+    """Append timing breakdown to log file."""
+    total = sum(d for _, d in _timings)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    lines = [f"\n--- {ts} | exit={exit_reason} | total={total:.1f}s ---"]
+    for phase, dur in _timings:
+        pct = (dur / total * 100) if total > 0 else 0
+        lines.append(f"  {phase:30s} {dur:7.1f}s  ({pct:4.1f}%)")
+    lines.append("")
+
+    try:
+        with open(TIMING_LOG, "a") as f:
+            f.write("\n".join(lines))
+    except OSError:
+        pass  # non-critical
 
 KONBAN_SCRIPT = get_konban_script()
 BRAIN_SCRIPT = get_brain_script()
+LINEAR_SCRIPT = get_linear_script()
 KB_SCRIPT = get_kb_dir() / "kb.py"
 SKILLS_DIR = get_skills_dir()
 
@@ -65,7 +112,7 @@ Your job: determine what actions should be taken to reconcile the artifacts with
 RULES:
 - Only propose actions for artifacts with value "medium" or "very_high"
 - Only propose actions for artifacts with persistence_status "not_persisted" or "partial"
-- Check if the artifact content already exists in Konban tasks or Brain docs (fuzzy match on title/content)
+- Check if the artifact content already exists in Konban tasks or Brain docs (fuzzy match on title, description, and content)
 - Flag conflicts between artifact content and current state (but NEVER resolve them — flag only)
 - Prefer enriching existing items over creating new ones:
   * For Konban tasks: use log_konban_task to add context to an existing task
@@ -151,7 +198,7 @@ When you receive a "commitment_update" artifact, map it to one or more actions o
 - "progress" → log_konban_task (log the progress)
 - "friction" → log_konban_task (log the friction signal — these are valuable behavioral data points)
 - "completion" → done_konban_task (if evidence is explicit) or log_konban_task (if signal is implicit)
-The "commitment_target" field in the artifact tells you which Konban task to target (fuzzy match against task titles in system state).
+The "commitment_target" field in the artifact tells you which Konban task to target (fuzzy match against task titles AND descriptions in system state).
 
 SKILL.md FIX STRUCTURED PATCHES:
 When proposing fix_skill, include a structured patch in the action:
@@ -243,11 +290,19 @@ def run_cmd(args: list[str], timeout: int = 30) -> str:
 
 
 def load_konban_state() -> str:
-    """Load current Konban board state."""
+    """Load current Konban board state with task descriptions."""
     if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
         return "[Konban board unavailable]"
-    output = run_cmd(["python3", str(KONBAN_SCRIPT), "board"], timeout=30)
+    output = run_cmd(["python3", str(KONBAN_SCRIPT), "board-detail"], timeout=60)
     return output or "[Konban board empty or unavailable]"
+
+
+def load_linear_state() -> str:
+    """Load current Linear board state (open issues)."""
+    if not LINEAR_SCRIPT or not LINEAR_SCRIPT.exists():
+        return "[Linear board unavailable]"
+    output = run_cmd(["python3", str(LINEAR_SCRIPT), "board"], timeout=30)
+    return output or "[Linear board empty or unavailable]"
 
 
 def load_brain_active_context() -> str:
@@ -346,36 +401,61 @@ def load_relevant_skill_docs(artifacts: list) -> str:
 def load_system_state(artifacts: list = None) -> str:
     """Load all system state for reconciliation context.
 
+    Runs independent state loads in parallel for speed.
+
     Args:
         artifacts: Optional list of pending artifacts. When provided,
             loads SKILL.md docs referenced by error_pattern artifacts.
     """
+    import concurrent.futures
+
     print("Loading system state...")
 
-    konban = load_konban_state()
-    print(f"  Konban: {len(konban)} chars")
+    def _timed_load(name, fn):
+        """Run a load function and return (name, result, elapsed)."""
+        start = time.monotonic()
+        result = fn()
+        elapsed = time.monotonic() - start
+        return name, result, elapsed
 
-    brain = load_brain_active_context()
-    print(f"  Brain Active Context: {len(brain)} chars")
+    # All independent loads run in parallel
+    loads = [
+        ("load_konban", load_konban_state),
+        ("load_linear", load_linear_state),
+        ("load_brain_ac", load_brain_active_context),
+        ("load_brain_index", load_brain_index),
+        ("load_decisions", load_recent_decisions),
+        ("load_git", load_git_history),
+    ]
 
-    brain_index = load_brain_index()
-    print(f"  Brain Index: {len(brain_index)} chars")
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        futures = [executor.submit(_timed_load, name, fn) for name, fn in loads]
+        for future in concurrent.futures.as_completed(futures):
+            name, result, elapsed = future.result()
+            results[name] = result
+            _timings.append((name, elapsed))
+            print(f"  [{name}] {elapsed:.1f}s — {len(result)} chars")
 
-    decisions = load_recent_decisions()
-    print(f"  Recent decisions: {len(decisions)} chars")
+    konban = results["load_konban"]
+    linear = results["load_linear"]
+    brain = results["load_brain_ac"]
+    brain_index = results["load_brain_index"]
+    decisions = results["load_decisions"]
+    git_history = results["load_git"]
 
-    git_history = load_git_history()
-    print(f"  Git history: {len(git_history)} chars")
-
-    # Load SKILL.md docs when error_pattern artifacts are pending
+    # Skill docs load is fast and depends on artifacts list, stays sequential
     skill_docs = ""
     if artifacts:
+        _start("load_skill_docs")
         skill_docs = load_relevant_skill_docs(artifacts)
-        if skill_docs:
-            print(f"  Skill docs: {len(skill_docs)} chars")
+        _end(f"{len(skill_docs)} chars")
 
-    state = f"""## Current Konban Board (active tasks)
+    state = f"""## Current Konban Board (active tasks — titles + descriptions)
 {konban}
+
+## Linear Board (open dev issues)
+{linear}
 
 ## Active Context (Brain)
 {brain}
@@ -397,17 +477,18 @@ def load_system_state(artifacts: list = None) -> str:
 
 STATE_CONSISTENCY_PROMPT = """You are a state-consistency checker for a personal knowledge management system.
 
-You receive the CURRENT STATE of the user's system: Active Context (strategic priorities), Konban board (task tracker), Brain doc index (knowledge base), and recent git commits.
+You receive the CURRENT STATE of the user's system: Active Context (strategic priorities), Konban board (personal task tracker), Linear board (dev issue tracker), Brain doc index (knowledge base), and recent git commits.
 
-Your job: find items in Active Context or Konban that are stale — the work they describe is already done (fully or partially) based on git commit evidence.
+Your job: find items in Active Context, Konban, or Linear that are stale — the work they describe is already done (fully or partially) based on git commit evidence.
 
 CRITICAL RULE: Only flag items that LITERALLY EXIST in the provided data. Do NOT infer or invent tasks.
 - For Konban: only flag tasks that appear in the Konban board text with a task title and ID
+- For Linear: only flag issues that appear in the Linear board text with an issue identifier (e.g., EARTH-292)
 - For Active Context: only flag priorities/milestones that are explicitly listed
 - NEVER create phantom items from mentions of shipped features
 
 PROCEDURE — follow these steps:
-1. List each Active Context priority/milestone and each Konban "Doing"/"To Do" task
+1. List each Active Context priority/milestone, each Konban "Doing"/"To Do" task, and each Linear issue in Backlog/Todo/In Progress
 2. For each item, scan ALL git commits for semantic matches (not just keyword matches)
 3. If a priority has SUB-ITEMS (e.g., workstreams a/b/c), check each sub-item independently
 4. Flag any item (or sub-item) where git commits show the work is shipped
@@ -423,6 +504,7 @@ WHAT TO FLAG:
 - Items where ALL the described work is done → flag as "completed"
 - Items where SOME sub-items are done → flag as "partially_completed" with details on what's done vs remaining
 - Konban tasks in "Doing" or "To Do" where the work is visible in commits
+- Linear issues in "Backlog", "Todo", or "In Progress" where the work is visible in commits
 
 EXAMPLE MATCH:
   Active Context says: "Profile depth — increase profile char limits + add Bio section"
@@ -438,7 +520,7 @@ Return ONLY valid JSON:
 {
   "stale_items": [
     {
-      "source": "active_context | konban",
+      "source": "active_context | konban | linear",
       "item": "exact item text from the provided data",
       "status": "completed | partially_completed",
       "evidence": "git commit hash(es) and what they did",
@@ -488,9 +570,9 @@ def call_state_consistency_check(system_state: str, model: str = DEFAULT_MODEL) 
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.HTTPError, urllib.error.URLError) as e:
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
         print(f"  State consistency check failed: {e}", file=sys.stderr)
-        return {"stale_items": [], "summary": "Check failed"}
+        return {"stale_items": [], "summary": f"Check failed: {type(e).__name__}"}
 
     content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
     if not content:
@@ -578,14 +660,24 @@ def call_reconciliation_model(artifacts_json: str, system_state: str, model: str
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         print(f"Error: OpenRouter API returned {e.code}: {body}", file=sys.stderr)
+        _end(f"HTTP {e.code}")
+        _write_timing_log(f"reconciliation_http_{e.code}")
         sys.exit(1)
     except urllib.error.URLError as e:
         print(f"Error: Could not reach OpenRouter: {e.reason}", file=sys.stderr)
+        _end(f"URLError: {e.reason}")
+        _write_timing_log("reconciliation_url_error")
+        sys.exit(1)
+    except TimeoutError:
+        print(f"Error: OpenRouter request timed out (180s)", file=sys.stderr)
+        _end("timeout_180s")
+        _write_timing_log("reconciliation_timeout")
         sys.exit(1)
 
     content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
     if not content:
         print("Error: Empty response from model", file=sys.stderr)
+        _write_timing_log("reconciliation_empty_response")
         sys.exit(1)
 
     # Parse JSON
@@ -607,6 +699,7 @@ def call_reconciliation_model(artifacts_json: str, system_state: str, model: str
     except json.JSONDecodeError as e:
         print(f"Error parsing reconciliation response: {e}", file=sys.stderr)
         print(f"Raw (first 500 chars):\n{content[:500]}", file=sys.stderr)
+        _write_timing_log("reconciliation_parse_error")
         sys.exit(1)
 
 
@@ -624,6 +717,8 @@ def main():
                         help="Pass action plan directly to executor")
     parser.add_argument("--consistency-only", action="store_true",
                         help="Only run state consistency check (no artifact reconciliation)")
+    parser.add_argument("--skip-consistency", action="store_true",
+                        help="Skip live consistency check, use cached result instead")
 
     args = parser.parse_args()
 
@@ -645,9 +740,40 @@ def main():
     system_state = load_system_state(artifacts=actionable if has_artifacts else None)
     print()
 
-    # State consistency check — runs always, even with no artifacts
-    print(f"Running state consistency check ({args.model})...")
-    consistency = call_state_consistency_check(system_state, args.model)
+    # State consistency check
+    cache_file = get_consistency_cache_file()
+
+    if args.skip_consistency:
+        # Read cached result instead of running live
+        consistency = {"stale_items": [], "summary": "No cached result"}
+        cache_age_str = "no cache"
+        if cache_file.exists():
+            try:
+                cached = json.loads(cache_file.read_text())
+                consistency = cached.get("result", consistency)
+                cached_at = cached.get("timestamp", "")
+                cache_age_str = cached_at or "unknown age"
+            except (json.JSONDecodeError, OSError):
+                pass
+        print(f"Using cached consistency result ({cache_age_str})")
+    else:
+        # Run live consistency check
+        _start("consistency_check")
+        print(f"Running state consistency check ({args.model})...")
+        consistency = call_state_consistency_check(system_state, args.model)
+        _end(f"{len(consistency.get('stale_items', []))} stale items")
+
+        # Cache the result
+        try:
+            cache_data = {
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "model": args.model,
+                "result": consistency,
+            }
+            cache_file.write_text(json.dumps(cache_data, indent=2, default=str))
+        except OSError:
+            pass
+
     stale_items = consistency.get("stale_items", [])
     if stale_items:
         print(f"\n  STALE STATE DETECTED ({len(stale_items)} item(s)):")
@@ -665,12 +791,14 @@ def main():
             with open(args.output, "w") as f:
                 json.dump(consistency, f, indent=2, default=str)
             print(f"Consistency report saved to {args.output}")
+        _write_timing_log("consistency_only")
         return
 
     if not has_artifacts and not stale_items:
         print("No pending artifacts and state is consistent. Nothing to do.")
         if artifacts_path == str(PENDING_FILE) and os.path.exists(artifacts_path):
             PENDING_FILE.write_text("[]")
+        _write_timing_log("nothing_to_do")
         return
 
     # Build action plan — combine artifact reconciliation + consistency findings
@@ -678,11 +806,13 @@ def main():
 
     # Artifact reconciliation (if any)
     if has_artifacts:
+        _start("reconciliation")
         print(f"Reconciling {len(actionable)} artifact(s)...")
         artifacts_json = json.dumps(actionable, indent=2, default=str)
         total_input = len(artifacts_json) + len(system_state)
         print(f"Calling {args.model} ({total_input} chars total input)...")
         action_plan = call_reconciliation_model(artifacts_json, system_state, args.model)
+        _end(f"{len(action_plan.get('proposed_actions', []))} actions")
 
     # Merge stale state findings as conflicts
     for item in stale_items:
@@ -732,7 +862,10 @@ def main():
 
     if args.dry_run:
         print("[DRY RUN — no actions taken]")
+        _write_timing_log("dry_run")
         return
+
+    _write_timing_log("ok")
 
     # Execute if requested
     if args.execute:

@@ -15,20 +15,23 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 [ -L "$0" ] && REPO_DIR="$(cd "$(dirname "$(readlink "$0")")" && pwd)"
 
 # Load all config values in one Python call
-eval "$(python3 -c "
+_config_out="$(python3 -c "
 import sys; sys.path.insert(0, '$REPO_DIR')
 from config import get_kb_dir, get_sessions_dir, get_recall_script, cfg
 print(f'KB_DIR=\"{get_kb_dir()}\"')
 print(f'SESSIONS_DIR=\"{get_sessions_dir()}\"')
-r = get_recall_script()
-print(f'RECALL_SCRIPT=\"{r if r else ""}\"')
+r = get_recall_script() or ''
+print(f'RECALL_SCRIPT=\"{r}\"')
 print(f'MAX_PER_RUN={cfg(\"daemon_max_per_run\", 5)}')
-" 2>/dev/null)" || {
-    KB_DIR="$HOME/.knowledge-base"
+" 2>/dev/null)"
+if [ -n "$_config_out" ]; then
+    eval "$_config_out"
+else
+    KB_DIR="$HOME/.claude/knowledge"
     SESSIONS_DIR="$HOME/.claude/projects"
     RECALL_SCRIPT=""
     MAX_PER_RUN=5
-}
+fi
 
 MARKER="$KB_DIR/.last-extraction"
 LOG="$KB_DIR/extraction.log"
