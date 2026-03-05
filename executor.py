@@ -477,9 +477,10 @@ def execute_create_brain_doc(action: dict, dry_run: bool) -> dict:
 def execute_enrich_brain_doc(action: dict, dry_run: bool) -> dict:
     """Append a new section to an existing Brain doc. Additive only — never modifies existing content.
 
-    Strategy: read existing doc, append new section, write back via update.
-    Only safe when the new section is purely additive — we never touch existing content.
-    Falls back to patch if the section already exists (re-enrichment replaces previous daemon section).
+    Strategy:
+    - If the section already exists (re-enrichment): use `patch` to replace just that section.
+    - If the section is new: use `append` to add blocks at the end. No deletions, no risk of data loss.
+    Never uses `update` — that does delete-all-then-rewrite and can nuke large pages on timeout.
     """
     if not BRAIN_SCRIPT or not BRAIN_SCRIPT.exists():
         return {"status": "failed", "reason": "Brain script not available"}
@@ -528,15 +529,15 @@ def execute_enrich_brain_doc(action: dict, dry_run: bool) -> dict:
             result["error"] = stderr
         return result
 
-    # Step 3: Append new section to existing content
-    enriched = existing_content + new_section
-
-    # Step 4: Write back via update (safe: we only added content)
+    # Step 3: Append new section using additive-only `append` command.
+    # NEVER use `update --force` here — update does delete-all-then-rewrite.
+    # On large pages (214+ blocks), a 90s timeout can kill the process after
+    # deletions commit but before writes complete, nuking the entire page.
     tmp_file = Path("/tmp") / f"daemon-enrich-{datetime.now().strftime('%Y%m%d%H%M%S')}.md"
-    tmp_file.write_text(enriched)
-    cmd = ["python3", str(BRAIN_SCRIPT), "update", target,
-           "--file", str(tmp_file), "--force"]  # --force because we're doing a full rewrite
-    exit_code, stdout, stderr = run_command(cmd, timeout=90)
+    tmp_file.write_text(new_section)
+    cmd = ["python3", str(BRAIN_SCRIPT), "append", target,
+           "--file", str(tmp_file)]
+    exit_code, stdout, stderr = run_command(cmd, timeout=60)
     tmp_file.unlink(missing_ok=True)
 
     result = {"status": "success" if exit_code == 0 else "failed",
@@ -767,21 +768,16 @@ def _cross_reference_artifact_groups(actions: list, results: list):
             f"{task_list}\n"
         )
 
-        # Read existing doc, append cross-reference section, write back
-        read_code, existing, _ = run_command(
-            ["python3", str(BRAIN_SCRIPT), "read", group["brain_doc"], "--raw"], timeout=30
-        )
-        if read_code != 0:
-            log_audit(f"  XREF: Could not read Brain doc '{group['brain_doc']}' for cross-referencing")
-            continue
-
+        # Append cross-reference section using additive-only `append` command.
+        # NEVER use `update --force` here — it does delete-all-then-rewrite and
+        # can nuke large pages on timeout (deletions commit, writes don't).
         import tempfile
         tmp = Path(tempfile.mktemp(suffix=".md", prefix="daemon-xref-"))
-        tmp.write_text(existing + xref_section)
+        tmp.write_text(xref_section)
         run_command(
-            ["python3", str(BRAIN_SCRIPT), "update", group["brain_doc"],
-             "--file", str(tmp), "--force"],
-            timeout=90,
+            ["python3", str(BRAIN_SCRIPT), "append", group["brain_doc"],
+             "--file", str(tmp)],
+            timeout=60,
         )
         tmp.unlink(missing_ok=True)
         log_audit(f"  XREF: Cross-referenced '{group['brain_doc']}' ↔ {len(group['konban_tasks'])} Konban task(s)")
