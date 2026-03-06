@@ -32,7 +32,7 @@ DEFAULTS = {
     ],
     "openrouter_url": "https://openrouter.ai/api/v1/chat/completions",
     "extraction_model": "qwen/qwen3.5-397b-a17b",
-    "reconciliation_model": "z-ai/glm-5",
+    "reconciliation_model": "google/gemini-3.1-flash-lite-preview",
     "http_referer": "",
     "context_overlap": 10,
     "max_transcript_chars": 50000,
