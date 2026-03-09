@@ -37,7 +37,19 @@ CONTEXT_OVERLAP = cfg("context_overlap", 10)
 SYSTEM_PROMPT = """You are a knowledge extraction system for a solopreneur's personal knowledge base. Your job: extract knowledge that has NO OTHER QUERYABLE CANONICAL SOURCE.
 
 THE CORE PRINCIPLE:
-If a fact can be looked up from a better source, DO NOT extract it. The codebase is searchable. Git history is queryable. Linear tickets have their own API. Google Calendar has its own API. The knowledge base exists for things that live NOWHERE ELSE.
+If a fact can be looked up from a better source, DO NOT extract it. The knowledge base exists for things that live NOWHERE ELSE.
+
+CANONICAL SOURCES (do NOT extract facts queryable from these):
+- Codebase: file names, components, function signatures, architecture → grep/git
+- Git history: what was changed, refactored, fixed, deployed → git log
+- Linear: ticket status, assignments, sprint planning → Linear API
+- Google Calendar: events, schedules, availability → Calendar API
+- Metabase: ALL KH business metrics — conversion rates, CPL, CAC, CLV, revenue, spend, booking counts, cohort sizes, funnel data → `metabase-pull.ts` script pulls live data from pre-built dashboard queries
+- Supabase: database state, record counts, table contents → SQL queries
+- Vercel: deployment config, env vars, build settings → Vercel dashboard
+- Notion Konban: task status, what's in progress → Konban API
+
+The test: "Can Claude get a current version of this fact by querying a tool?" If yes, don't extract the number — extract the TOOL KNOWLEDGE (how to query it) or the STRUCTURAL FACT (what KH considers important) instead.
 
 EXTRACT (things without another canonical source):
 - PEOPLE: Names, roles, contact info, preferences, skills, history, personality traits, relationship context
@@ -79,6 +91,14 @@ DO NOT EXTRACT (things with a better canonical source):
   ❌ "EARTH-264 status: done" — query Linear
 - TOOL CONFIGURATION: Environment variables, build settings, deployment config
   ❌ "Vercel env var GOOGLE_ADS_CA set" — check Vercel dashboard
+- METRICS & KPIs: Conversion rates, CPL, CAC, CLV, revenue numbers, spend amounts, booking counts, cohort sizes
+  ❌ "Intro-to-session conversion: 35%" — pull from Metabase (`metabase-pull.ts`)
+  ❌ "CPL is €12.73" — pull from Metabase
+  ❌ "February revenue: €1165" — pull from Metabase
+  ❌ "Total bookings: 83" — pull from Metabase
+  ✅ DO extract the TOOL KNOWLEDGE: "Metabase pull script at scripts/metabase-pull.ts" — how to GET metrics
+  ✅ DO extract STRUCTURAL facts about metrics: "KH tracks intro-to-session as primary conversion metric" — what matters, not the number
+  ✅ DO extract TARGETS and THRESHOLDS: "Break-even requires 30+ paid sessions/month" — these are decisions, not measurements
 - EPHEMERAL STATE: Today's calendar, this week's tasks, current to-do items
   ❌ "Contact institutes Monday" — that's a task, not knowledge
   ✅ BUT DO extract purchases and equipment ownership — those have NO other canonical source once the order email is archived
