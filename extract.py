@@ -55,6 +55,11 @@ EXTRACT (things without another canonical source):
 - NAVIGATIONAL KNOWLEDGE: Where non-code things live (GDrive folders, Notion pages, booking links)
   "Consulting client files at GDrive - KEPersonal:Consulting/[Client]/"
   "Booking links: cal.com/kkauf/ — 45min, 30min, 20min, 15min variants"
+- PERSONAL ASSETS & PURCHASES: Equipment, property, subscriptions, significant purchases — with brand, model, date, and use case
+  "Bought REP tube resistance bands with handles, $22, for shoulder rehab exercises at desk"
+  "Ordered 16kg kettlebell from Rep Fitness, $75, for movement breaks between work blocks"
+  "Owns Concept2 rowing machine — daily zone 2 cardio"
+  These are NOT ephemeral — they're referenced in future conversations about routines, exercises, workspace setup. Extract them.
 - TEMPORAL STATE not tracked elsewhere: Engagement status, project phases, health patterns
   "Kampschulte engagement: Phase 2 active, $X/hr"
   "Sauna project: planning phase, target late fall 2026"
@@ -76,6 +81,15 @@ DO NOT EXTRACT (things with a better canonical source):
   ❌ "Vercel env var GOOGLE_ADS_CA set" — check Vercel dashboard
 - EPHEMERAL STATE: Today's calendar, this week's tasks, current to-do items
   ❌ "Contact institutes Monday" — that's a task, not knowledge
+  ✅ BUT DO extract purchases and equipment ownership — those have NO other canonical source once the order email is archived
+  ✅ DO extract durable personal facts mentioned alongside scheduling: birthdays, property descriptions, family roles
+     "Konstantin's birthday is May 5, Katherine's is May 9" — these are permanent facts, not ephemeral
+     "Washington Island is a family summer home in Wisconsin" — property description, always relevant
+  ✅ DO extract significant multi-day events/visits with dates as facts on the relevant entity:
+     "ECCB dance residency at Sky Hill Farm, June 22 - July 1, 2026" → fact on Sky Hill Farm or ECCB entity
+     These create historical records. Use temporal attributes like "event_2026_summer" not "next_visit"
+  ⚠️ For tentative dates that will shift, extract the POINTER to the source of truth, not the date:
+     "Move-in week tentatively May 11-17, tracked in CoupleCal" → fact: "move_in_tracking = CoupleCal event 'Move Week', tentative May 2026"
 
 COMMITMENT TRACKING (requires CONTEXT FRAME):
 If a CONTEXT FRAME section is included, it lists active commitments. When conversations reference these, extract ONLY:
@@ -253,10 +267,51 @@ def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL, domain_co
         sys.exit(2)
 
 
+def _fuzzy_find_entity(db: sqlite3.Connection, name: str) -> sqlite3.Row | None:
+    """Fuzzy-match an entity name against existing entities.
+
+    Prevents duplicates like "REP tube resistance bands with handles" when
+    "REP Resistance Bands" already exists. Uses word-overlap scoring:
+    if 50%+ of significant words (4+ chars) match an existing entity, it's a hit.
+    """
+    # Extract significant words from the new name
+    words = set(re.findall(r'[a-z]{4,}', name.lower()))
+    if not words:
+        return None
+
+    # Build SQL: find entities where the name contains ANY of these words
+    # Then score by word overlap
+    placeholders = " OR ".join(["lower(name) LIKE ?"] * len(words))
+    params = [f"%{w}%" for w in words]
+    candidates = db.execute(
+        f"SELECT id, name, type FROM entities WHERE {placeholders}",
+        params,
+    ).fetchall()
+
+    best_match = None
+    best_score = 0.0
+
+    for c in candidates:
+        c_words = set(re.findall(r'[a-z]{4,}', c["name"].lower()))
+        if not c_words:
+            continue
+        overlap = words & c_words
+        # Require at least 2 words overlap to avoid "Google" matching everything
+        if len(overlap) < 2:
+            continue
+        # Jaccard similarity: intersection / union
+        score = len(overlap) / len(words | c_words)
+        if score > best_score and score >= 0.4:
+            best_score = score
+            best_match = c
+
+    return best_match
+
+
 def upsert_extractions(db: sqlite3.Connection, extractions: dict, source: str, date: str, domain: str = None):
     """Write extracted knowledge into the database."""
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    stats = {"entities": 0, "facts": 0, "relations": 0, "decisions": 0, "superseded": 0}
+    stats = {"entities": 0, "facts": 0, "relations": 0, "decisions": 0, "superseded": 0, "deduped": 0}
 
     VALID_TYPES = {'person', 'project', 'company', 'concept', 'feature', 'tool'}
 
@@ -268,9 +323,16 @@ def upsert_extractions(db: sqlite3.Connection, extractions: dict, source: str, d
         if etype not in VALID_TYPES:
             etype = "concept"  # Default for unknown types
 
+        # Tier 1: exact match (case-insensitive)
         existing = db.execute(
             "SELECT * FROM entities WHERE lower(name) = lower(?)", (name,)
         ).fetchone()
+
+        # Tier 2: fuzzy match (word overlap) — prevents near-duplicates
+        if not existing:
+            existing = _fuzzy_find_entity(db, name)
+            if existing:
+                stats["deduped"] += 1
 
         if existing:
             entity_map[name.lower()] = existing['id']
@@ -300,9 +362,13 @@ def upsert_extractions(db: sqlite3.Connection, extractions: dict, source: str, d
         # Find entity (might have been created above, or might already exist)
         eid = entity_map.get(entity_name.lower())
         if not eid:
+            # Tier 1: exact match
             existing = db.execute(
                 "SELECT id FROM entities WHERE lower(name) = lower(?)", (entity_name,)
             ).fetchone()
+            # Tier 2: fuzzy match
+            if not existing:
+                existing = _fuzzy_find_entity(db, entity_name)
             if existing:
                 eid = existing['id']
             else:
@@ -837,10 +903,12 @@ def _classify_error_type(failed_cmd: str, error_text: str, success_cmd: str = No
 def parse_session_jsonl(session_path: str) -> str:
     """Parse a Claude Code JSONL session file into a readable transcript.
 
-    Legacy mode: returns last 50 messages (used when --no-incremental is set).
+    Non-incremental mode: returns ALL messages (truncation to max_transcript_chars
+    happens downstream in main()). Previously limited to last 50 messages, which
+    silently dropped early-session facts during backfill re-extraction.
     """
     messages = _parse_all_messages(session_path)
-    texts = [f"[{m['role']}]: {m['content']}" for m in messages[-50:]]
+    texts = [f"[{m['role']}]: {m['content']}" for m in messages]
     return "\n\n".join(texts)
 
 
