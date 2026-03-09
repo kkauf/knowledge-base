@@ -144,6 +144,17 @@ STALENESS CHECK (critical):
 - When an artifact is stale, set rationale to explain WHY it's stale (e.g., "Already addressed: Active Context shows profile improvements deployed on Feb 20").
 - Only create Brain docs for content that is STILL VALUABLE as a reference document, even if the recommendations were already acted upon. Strategic analyses, research findings, and decision frameworks retain value. Implementation checklists and "what to do next" lists do NOT.
 
+BRAIN DOC EXCLUSIONS (hard filter — NEVER create_brain_doc for these):
+- Implementation debugging: CSS overflow traces, API error investigations, test failure root-cause analyses, "how I fixed bug X" narratives. These belong in git commits and Linear issues.
+- Codebase inventories: listings of all templates, test files, endpoints, or architecture dumps that describe current code structure without strategic insight. The codebase itself is the source of truth.
+- Session summaries: play-by-play of what happened during a coding session ("first we fixed X, then Y"). No lasting value.
+- Single-bug post-mortems: if the fix is already shipped and the lesson is narrow/implementation-specific (e.g., "add overflow-wrap to h1"), it's not Brain-worthy. Exception: systemic incidents with architectural lessons (e.g., "Stripe Connect webhook scoping") MAY qualify if the lesson changes future architecture decisions.
+- E2E test analyses: test gap inventories, stability reports, failure summaries. These are QA artifacts, not strategic knowledge.
+- Documentation TODO lists: "these 4 files need updating after feature X". The PR/commit is the source of truth.
+- Non-KH personal content: exercise routines, recipes, personal health protocols. The domain guard should block these, but if domain is misclassified, apply this rule.
+
+The test: "Would a CEO reference this document next quarter when making a strategic decision?" If no → no_action.
+
 CONTENT PASS-THROUGH (critical):
 - Each artifact has a "content" field containing the FULL reproduced work product.
 - For create_brain_doc actions: copy the artifact's "content" field VERBATIM into the action's "content" field. Do NOT summarize, excerpt, or describe what the content contains. The executor creates the Brain doc directly from this field.

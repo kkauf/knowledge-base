@@ -62,8 +62,16 @@ EXTRACTION_PROMPT = """You are an artifact extraction system for a personal know
 Your job: read a conversation transcript and REPRODUCE structured work products that have durable value beyond the session. You are creating the permanent record — if you don't reproduce the content, it is lost forever.
 
 IMPORTANT DISTINCTIONS:
-- ARTIFACTS (extract these): Plans with ordered steps, strategic analyses with sections, decision frameworks, roadmaps with milestones, architectural designs, interview analysis summaries
+- ARTIFACTS (extract these): Plans with ordered steps, strategic analyses with sections, decision frameworks, roadmaps with milestones, architectural designs, interview analysis summaries, research briefs with lasting reference value
 - NOT ARTIFACTS (skip these): Casual discussion, code snippets (already in git), daily standup dashboards (ephemeral), simple Q&A, tool output, error messages, status updates
+- IMPLEMENTATION ARTIFACTS (skip these — they belong in git/Linear, not the knowledge base):
+  * Debugging narratives: "why X overflows at 375px", "root cause of API 400 error", test failure investigations
+  * Codebase inventories: listing all templates, all test files, all endpoints, all email types
+  * Session play-by-play summaries: "first we fixed X, then we fixed Y, then we committed"
+  * Single-bug post-mortems: fix is already shipped, lesson is narrow and implementation-specific
+  * CSS/layout audits, mobile optimization checklists, E2E test analyses
+  * Documentation TODO lists: "these files need updating" — the git diff is the source of truth
+  * Architecture dumps that just describe current code structure without strategic insight
 - EPHEMERAL (skip these): Capacity snapshots, daily schedules, meeting agendas — these go stale within days
 
 COMMITMENT UPDATES (extract these when CONTEXT FRAME is present):
