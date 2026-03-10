@@ -149,6 +149,13 @@ if [ "$LATEST_PROCESSED_TIME" -gt "$LAST_RUN" ]; then
     log "Marker advanced to $LATEST_PROCESSED_TIME"
 fi
 
+# Seed lookup_path routing pointers on new entities (deterministic, no LLM cost)
+SEED_SCRIPT="$REPO_DIR/seed-lookup-paths.py"
+if [ "$PROCESSED" -gt 0 ] && [ -f "$SEED_SCRIPT" ]; then
+    python3 "$SEED_SCRIPT" --write >> "$LOG" 2>&1
+    log "Lookup paths seeded"
+fi
+
 # Rebuild recall index if we processed anything
 if [ "$PROCESSED" -gt 0 ] && [ -n "$RECALL_SCRIPT" ]; then
     if [ -f "$RECALL_SCRIPT" ]; then
