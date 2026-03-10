@@ -131,9 +131,20 @@ Business/Consulting: [client name as sub-category]
 Business/KE: LLC admin | Legal | Brand
 Infrastructure: Knowledge Base | Claude Config | Automation
 
+DISAMBIGUATION RULES:
+- The CONTENT determines category, not the mechanism — "ordering supplements" is
+  Personal/Health (the content), not Personal/Finance (the transaction).
+- The SESSION PROJECT does NOT determine category. Personal insurance discussed
+  during a KH coding session → Personal/Finance, NOT Business/KH/Billing. A KH
+  email template mentioned in a standup → Business/KH/Marketing, not Personal.
+  Classify by the artifact's SUBJECT MATTER, ignoring which project the session is in.
+- Business/KH/Billing = KH platform billing (therapist commissions, Stripe, invoicing
+  for KH services). Personal insurance, rent, personal bank accounts → Personal/Finance.
+
 Include 3-5 key_terms that distinguish this artifact from others in the same category.
-The CONTENT determines category, not the mechanism — "ordering supplements" is Health
-(the content), not Finance (the transaction).
+
+TITLE QUALITY: If you cannot produce a meaningful, descriptive title for an artifact,
+it is probably not a standalone artifact — skip it. Never output "?" or empty titles.
 
 Return ONLY valid JSON:
 {
@@ -470,6 +481,14 @@ def main():
     artifacts = result.get("artifacts", [])
     errors = result.get("error_patterns", [])
     summary = result.get("session_summary", "")
+
+    # Post-processing: filter garbage artifacts (no title, "?" title, single-char title)
+    pre_filter = len(artifacts)
+    artifacts = [a for a in artifacts
+                 if a.get("title") and len(a["title"].strip()) > 3
+                 and a["title"].strip() not in ("?", "??", "...", "N/A", "n/a", "Untitled")]
+    if len(artifacts) < pre_filter:
+        print(f"Filtered {pre_filter - len(artifacts)} artifact(s) with garbage titles")
 
     print(f"Found: {len(artifacts)} artifact(s), {len(errors)} error pattern(s)")
     if summary:

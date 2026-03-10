@@ -42,23 +42,54 @@ If a fact can be looked up from a better source, DO NOT extract it. The knowledg
 CANONICAL SOURCE PRINCIPLE:
 Before extracting any fact, ask: "Can this be looked up from a live system in one hop?"
 
-If YES → DON'T extract the fact. Instead, extract HOW to find it:
-  ✅ "Levent's session data → Supabase: SELECT * FROM cal_bookings WHERE therapist = 'Levent'"
-  ✅ "KH deployment status → Vercel dashboard or `vercel ls`"
-  ✅ "February invoice status → check Stripe dashboard for therapist X"
+If YES → DON'T extract the stale value. Instead, decide:
+  A) SIGNIFICANT ENTITY (person, client, therapist, project) with queryable dimensions
+     → Extract a lookup_path routing pointer so future sessions know WHERE to look:
+     ✅ entity="Levent", attribute="lookup_path", value="session data → Supabase: SELECT * FROM cal_bookings WHERE therapist ILIKE '%Levent%'"
+     ✅ entity="Levent", attribute="lookup_path_billing", value="invoice status → Stripe dashboard, search by therapist email"
+  B) GENERIC/TEMPORARY thing (a deployment, a count, a metric)
+     → Skip entirely. No entity, no fact, no routing pointer.
+     ❌ "The deployment is on Vercel" → skip (not entity-worthy)
+     ❌ "3 Linear tickets are open" → skip (just query Linear)
+
+The heuristic: Would Claude benefit from knowing WHERE to look up this entity's dynamic data
+in a future session? If yes → lookup_path on the entity. If the entity itself isn't worth
+tracking → skip entirely.
 
 If NO → Extract the fact:
   ✅ "Mason is Katherine's brother" (no live system stores family relationships)
   ✅ "Oz has a bite history — Cornell position is behavioral euthanasia"
 
-You don't need an enumerated list of sources. Use your judgment:
+KNOWN LIVE SOURCES (do NOT extract facts queryable from these):
+- Metabase: ALL KH business metrics — conversion rates, CPL, CAC, CLV, revenue, spend, booking counts, cohort sizes, funnel data, age/gender breakdowns → `metabase-pull.ts`
+- Supabase: database state, therapist records, session counts, match status, form data → SQL queries
+- Git history: what was changed, refactored, fixed, deployed → git log
+- Linear: ticket status, assignments, sprint planning → Linear API
+- Google Calendar: events, schedules, availability → Calendar API
+- Vercel: deployment config, env vars, build settings → Vercel dashboard
+- Notion Konban: task status, what's in progress → Konban API
+
+General heuristic:
 - Database tables, API endpoints, dashboards, git repos = live queryable sources
 - Relationships, decisions, preferences, biographical facts = no canonical source
 - Calendar events, task statuses = live source exists (don't cache)
 - What someone SAID or DECIDED = no live source (extract it)
 
-When you extract a routing pointer instead of a fact, use the attribute format:
-  lookup_path: "description of how to find this information"
+NUMBERS AND PERCENTAGES: Any number discussed in conversation (conversion rates, revenue,
+session counts, age breakdowns, cost-per-lead, €/$ amounts) is ALWAYS queryable from
+Metabase or Supabase. Extract the STRUCTURAL fact or a lookup_path, NEVER the number:
+  ❌ "intro-to-session rate = 37%" → queryable from Metabase
+  ✅ "KH tracks intro-to-session as primary conversion metric" → structural
+  ❌ "25-44 age range sweet spot at €10/conversion" → queryable from Metabase
+  ✅ "Considering age-based targeting filter on Google Ads" → decision (no number)
+  ❌ "Males convert at 9.5% vs females 6.8%" → queryable from Metabase
+  ✅ "Exploring gender-based Google Ads bid adjustment" → strategic intent (no number)
+
+When a statement mixes a decision with a metric, extract ONLY the decision, strip the number.
+
+ROUTING POINTERS for significant entities with queryable dimensions:
+  ✅ entity="Levent", attribute="lookup_path", value="session data → Supabase cal_bookings WHERE therapist ILIKE '%Levent%'"
+  ✅ entity="Google Ads", attribute="lookup_path", value="campaign metrics → Metabase metabase-pull.ts"
 
 The test: "Can Claude get a current version of this fact by querying a tool?" If yes, don't extract the number — extract the TOOL KNOWLEDGE (how to query it) or the STRUCTURAL FACT (what KH considers important) instead.
 
