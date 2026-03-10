@@ -127,6 +127,7 @@ RULES:
     - escalation_cascade → fix_skill (patch_type: report_bug) — helper script needs a new capability
     - output_truncation → fix_skill (patch_type: report_bug) — helper script truncates needed data
     - identical_retry → context-dependent: if corroborated, route to appropriate fix; standalone → document expected output in SKILL.md
+    - user_correction → Claude used the right tool but wrong parameters for the context (e.g., wrong email account, wrong database). The user's correction text contains the fix. Propose fix_skill to add routing rules, parameter defaults, or disambiguation guidance to the relevant SKILL.md.
 - Be conservative — when in doubt, propose no_action rather than creating noise
 
 ENRICHMENT vs CREATION decision:

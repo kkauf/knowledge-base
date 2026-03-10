@@ -599,9 +599,10 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
                           "missing_flag" | "inefficient_lookup" | "discovery_call" | "other",
         }]
     """
-    # Step 1: Extract all tool_use and tool_result blocks with ordering
+    # Step 1: Extract all tool_use, tool_result, and user text messages with ordering
     tool_calls = {}  # tool_use_id -> {name, input, index}
     tool_results = {}  # tool_use_id -> {content, index}
+    user_messages = []  # [{text, line, order}] — user text messages (not tool_results)
     block_index = 0
 
     with open(session_path) as f:
@@ -618,6 +619,25 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
             if not isinstance(inner, dict):
                 continue
             content = inner.get("content", "")
+
+            # Capture user text messages (content is a string or list with text blocks)
+            if msg_type == "user":
+                user_text = ""
+                if isinstance(content, str):
+                    user_text = content
+                elif isinstance(content, list):
+                    user_text = "\n".join(
+                        b.get("text", "") for b in content
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    )
+                if user_text.strip():
+                    user_messages.append({
+                        "text": user_text.strip(),
+                        "line": line_num,
+                        "order": block_index,
+                    })
+                    block_index += 1
+
             if not isinstance(content, list):
                 continue
 
@@ -646,6 +666,7 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
     skill_calls = []       # Bash calls to skill helpers
     raw_api_calls = []     # Bash calls hitting APIs directly (bypassing helpers)
     skill_inspections = [] # Read/Grep/Glob targeting skill source code
+    mcp_calls = []         # MCP tool calls (workspace-mcp, etc.)
 
     for tool_id, call in sorted(tool_calls.items(), key=lambda x: x[1]["order"]):
         result = tool_results.get(tool_id, {})
@@ -701,6 +722,29 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
                             "order": call["order"],
                         })
                         break
+
+        elif call["name"].startswith("mcp__"):
+            # Index MCP tool calls (workspace-mcp, claude-in-chrome, etc.)
+            mcp_parts = call["name"].split("__", 2)
+            mcp_server = mcp_parts[1] if len(mcp_parts) > 1 else call["name"]
+            mcp_method = mcp_parts[2] if len(mcp_parts) > 2 else ""
+            # Map MCP servers to skill names for routing
+            mcp_skill_map = {
+                "workspace-mcp": "gmail",  # most workspace-mcp calls are email
+                "claude-in-chrome": "chrome",
+            }
+            skill_name = mcp_skill_map.get(mcp_server, mcp_server)
+            # Override: workspace-mcp calendar calls → gcal skill
+            if mcp_server == "workspace-mcp" and "event" in mcp_method:
+                skill_name = "gcal"
+            mcp_calls.append({
+                "skill": skill_name,
+                "mcp_server": mcp_server,
+                "method": mcp_method,
+                "input": call["input"],
+                "result": result_text[:2000],
+                "order": call["order"],
+            })
 
         elif call["name"] == "Read":
             file_path = call["input"].get("file_path", "")
@@ -866,6 +910,67 @@ def _parse_tool_error_sequences(session_path: str, offset: int = -1) -> list[dic
             "error_text": "Claude searched skill directory (SKILL.md was insufficient)",
             "successful_command": None,
             "error_type": "skill_inspection",
+        })
+
+    # Pattern 6 — User Correction: Tool call succeeds but user redirects to
+    # different parameters. Detects short, directive corrections like
+    # "Personal gmail: --> konstantin.kaufmann@gmail.com" or "wrong account, use X".
+    # This catches routing errors (wrong email account, wrong DB, wrong calendar).
+    #
+    # Filtering criteria to avoid false positives:
+    # - User message must be SHORT (<200 chars) — corrections are terse, not essays
+    # - Must contain a redirect signal (-->, →, "use X instead", "wrong account")
+    # - Must be CLOSE to a tool call (within 3 ordering positions)
+    # - Excludes messages that look like general conversation or task management
+    _CORRECTION_RE = re.compile(
+        r'(?:-->\s*\S+@\S+|→\s*\S+@\S+'                 # arrows followed by email address
+        r'|-->\s*[a-z0-9._-]+\.[a-z]'                   # arrows followed by domain/path-like value
+        r'|wrong\s+(?:account|email|address|database|calendar|inbox)'
+        r'|use\s+\S+@\S+|use\s+\S+\s+instead'           # "use x@y" or "use X instead"
+        r'|not\s+(?:that\s+(?:account|email|one))'       # "not that account"
+        r'|should\s+be\s+\S+@)',                         # "should be x@y"
+        re.IGNORECASE,
+    )
+
+    # Build ordered list of all tool calls (skill helpers + MCP) for lookback
+    all_tool_calls = []
+    for sc in skill_calls:
+        all_tool_calls.append({
+            "skill": sc["skill"],
+            "command": sc["command"],
+            "order": sc["order"],
+            "source": "skill",
+        })
+    for mc in mcp_calls:
+        all_tool_calls.append({
+            "skill": mc["skill"],
+            "command": f'{mc["mcp_server"]}.{mc["method"]}({json.dumps(mc["input"])[:200]})',
+            "order": mc["order"],
+            "source": "mcp",
+        })
+    all_tool_calls.sort(key=lambda x: x["order"])
+
+    for umsg in user_messages:
+        # Short messages only — corrections are terse
+        if len(umsg["text"]) > 200:
+            continue
+        if not _CORRECTION_RE.search(umsg["text"]):
+            continue
+        # Must be close to a preceding tool call (within 3 ordering positions)
+        preceding_call = None
+        for tc in reversed(all_tool_calls):
+            if tc["order"] < umsg["order"] and (umsg["order"] - tc["order"]) <= 3:
+                preceding_call = tc
+                break
+        if not preceding_call:
+            continue
+        error_sequences.append({
+            "skill": preceding_call["skill"],
+            "script": "SKILL.md",
+            "failed_command": preceding_call["command"],
+            "error_text": f"User correction: {umsg['text'][:500]}",
+            "successful_command": None,
+            "error_type": "user_correction",
         })
 
     return error_sequences
