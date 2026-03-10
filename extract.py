@@ -1248,6 +1248,16 @@ def main():
         if domain_context:
             print(f"Domain: {domain} (injecting {domain_context.count(chr(10))} lines of context)")
 
+    # Check if this session is linked to a Konban task
+    linked_task = None
+    try:
+        from context_frame import get_task_for_session
+        linked_task = get_task_for_session(source)
+        if linked_task:
+            print(f"Linked task: {linked_task['title']} [{linked_task['task_id'][:8]}]")
+    except ImportError:
+        pass
+
     # Load dynamic context frame (active commitments, priorities)
     context_frame = ""
     try:
@@ -1259,8 +1269,20 @@ def main():
         pass  # Graceful degradation if context_frame.py not available
     print()
 
-    # Extract — combine domain context with context frame
+    # Extract — combine domain context with context frame and linked task
     combined_context = domain_context
+    if linked_task:
+        task_hint = (
+            f"\nLINKED TASK: This session is explicitly linked to Konban task: "
+            f"\"{linked_task['title']}\" (status: {linked_task['status']}, "
+            f"priority: {linked_task['priority']}). "
+            f"Use this as context for entity and fact extraction — facts from this session "
+            f"are likely related to the task's domain.\n"
+        )
+        if combined_context:
+            combined_context = task_hint + "\n" + combined_context
+        else:
+            combined_context = task_hint
     if context_frame:
         if combined_context:
             combined_context += "\n\n"

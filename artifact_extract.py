@@ -225,12 +225,26 @@ def _set_artifact_offset(session_path: str, offset: int):
 # --- Model call ---
 
 def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL,
-                          context_frame: str = "", tool_errors: list = None) -> dict:
+                          context_frame: str = "", tool_errors: list = None,
+                          linked_task: dict = None) -> dict:
     """Call GLM-5 via OpenRouter to extract artifacts."""
     api_key = get_api_key()
 
-    # Build user content with optional context frame and tool errors
+    # Build user content with optional task link, context frame, and tool errors
     parts = []
+    if linked_task:
+        parts.append(
+            "LINKED TASK: This session is explicitly linked to a Konban task. "
+            "Use the task's context as a STRONG prior for artifact classification.\n\n"
+            f"<linked_task>\n"
+            f"Task: {linked_task['title']}\n"
+            f"Status: {linked_task['status']}\n"
+            f"Priority: {linked_task['priority']}\n"
+            f"</linked_task>\n\n"
+            "Unless the conversation clearly shifts to a different topic, "
+            "classify artifacts based on this task's domain. "
+            "commitment_update artifacts should reference this task as the target.\n\n"
+        )
     if context_frame:
         parts.append(
             "The following CONTEXT FRAME shows the user's active commitments and priorities. "
@@ -450,6 +464,16 @@ def main():
 
     domain = detect_session_domain(session_path)
 
+    # Check if this session is linked to a Konban task
+    linked_task = None
+    try:
+        from context_frame import get_task_for_session
+        linked_task = get_task_for_session(session_path)
+        if linked_task:
+            print(f"Linked task: {linked_task['title']} [{linked_task['task_id'][:8]}]")
+    except ImportError:
+        pass
+
     # Load dynamic context frame (active commitments, priorities)
     context_frame = ""
     try:
@@ -474,9 +498,10 @@ def main():
     print(f"Model: {args.model} | Domain: {domain or 'unknown'}")
     print()
 
-    # Call model with context frame and tool errors
+    # Call model with context frame, tool errors, and linked task
     result = call_extraction_model(transcript, args.model, context_frame,
-                                    tool_errors=tool_errors if tool_errors else None)
+                                    tool_errors=tool_errors if tool_errors else None,
+                                    linked_task=linked_task)
 
     artifacts = result.get("artifacts", [])
     errors = result.get("error_patterns", [])

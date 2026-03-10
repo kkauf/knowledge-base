@@ -226,6 +226,61 @@ def load_context_frame() -> str:
     return ""
 
 
+# --- Session-Task Map ---
+
+SESSION_MAP_FILE = KB_DIR / "session-task-map.json"
+SESSION_MAP_TTL_HOURS = DEFAULT_TTL_HOURS  # Same TTL as context frame
+
+
+def _refresh_session_task_map() -> dict:
+    """Build session→task map from Konban and cache it."""
+    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
+        return {}
+    output = run_cmd(["python3", str(KONBAN_SCRIPT), "session-map"], timeout=30)
+    if not output:
+        return {}
+    try:
+        mapping = json.loads(output)
+    except json.JSONDecodeError:
+        return {}
+    # Cache to file
+    SESSION_MAP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_MAP_FILE.write_text(json.dumps(mapping, indent=2))
+    return mapping
+
+
+def load_session_task_map() -> dict:
+    """Load the session→task map, refreshing if stale.
+
+    Returns dict: {session_uuid: {task_id, title, status, priority}}
+    Called by extract.py and artifact_extract.py to check if a session
+    is linked to a Konban task.
+    """
+    # Check if cached map is fresh
+    if SESSION_MAP_FILE.exists():
+        age_hours = (datetime.now().timestamp() - SESSION_MAP_FILE.stat().st_mtime) / 3600
+        if age_hours < SESSION_MAP_TTL_HOURS:
+            try:
+                return json.loads(SESSION_MAP_FILE.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+    return _refresh_session_task_map()
+
+
+def get_task_for_session(session_path: str) -> dict | None:
+    """Look up the linked Konban task for a session file.
+
+    Args:
+        session_path: Path to a .jsonl session file (full or basename)
+
+    Returns:
+        Task metadata dict {task_id, title, status, priority} or None.
+    """
+    session_key = os.path.splitext(os.path.basename(session_path))[0]
+    mapping = load_session_task_map()
+    return mapping.get(session_key)
+
+
 # --- CLI ---
 
 def main():

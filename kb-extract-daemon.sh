@@ -49,6 +49,15 @@ if [ -f "$CONTEXT_FRAME" ]; then
     python3 "$CONTEXT_FRAME" --refresh >> "$LOG" 2>&1 || log "Context frame refresh failed (non-critical)"
 fi
 
+# Refresh session-task map (TTL-based, same cadence as context frame)
+# Gives extractors awareness of which sessions are linked to Konban tasks
+python3 -c "
+import sys; sys.path.insert(0, '$REPO_DIR')
+from context_frame import load_session_task_map
+m = load_session_task_map()
+print(f'Session-task map: {len(m)} linked session(s)')
+" >> "$LOG" 2>&1 || log "Session-task map refresh failed (non-critical)"
+
 # Get last extraction time (epoch seconds), default to 0
 if [ -f "$MARKER" ]; then
     LAST_RUN=$(cat "$MARKER")
