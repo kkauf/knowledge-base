@@ -1,7 +1,7 @@
 # ADR-007: Semantic Session Memory
 
 **Date**: 2026-03-09
-**Status**: Proposed
+**Status**: Partially Implemented (category taxonomy shipped Mar 10; session memory still proposed)
 **Triggered by**: Resistance band amnesia incident — Claude gave generic advice on equipment it had recommended, researched, and helped order 6 days earlier.
 
 ## Problem
@@ -289,6 +289,31 @@ Both cases: let LLMs do LLM work, but give them structure so they do it well.
 - **Category assignment at creation**: When creating Konban tasks or extracting entities, classify at write-time. Cheaper than re-classifying at every read.
 - **Taxonomy lives in the LLM prompt**, not in code. The seed taxonomy above gives the model enough structure to classify consistently, but new sub-categories can emerge without code changes.
 - Fail-safe: 0 candidates after filtering → `no_action`. No guessing.
+
+### Implementation Status (Mar 10, 2026)
+
+**Shipped (category taxonomy — Phase 1 of the addendum):**
+- `artifact_extract.py`: category/sub_category/key_terms on every artifact. Disambiguation rules: session project ≠ artifact category. Garbage title filter.
+- `pipeline_reconcile.py`: Category-aware matching in reconciliation prompt + domain preamble enriched with category data. Action schema includes category/sub_category pass-through.
+- `executor.py`: Daemon-created tasks prefixed with `[Category/Sub]` in title.
+- `extract.py`: Canonical source principle with enumerated guardrails. `lookup_path` attribute format for routing pointers. Metric number stripping in hybrid decision/metric facts.
+- `kb-recall.py`: `lookup_path` attributes surfaced as `⚡ QUERY SOURCE:` in recall output.
+- `seed-lookup-paths.py`: Deterministic seeding of 48 lookup_paths (therapists→Supabase, clients→GDrive, metrics→Metabase). Hooked into daemon (runs after each extraction cycle).
+- `validate-taxonomy.py`: Parallel validation harness (8 workers, 50 sessions in ~7min).
+
+**Validation results (10-session smoke test):**
+- Category hit rate: 100% on new extractions
+- Disambiguation: State Farm personal insurance correctly excluded from Business/KH/Billing
+- Garbage titles: "?" titles filtered by both prompt instruction and code post-processing
+- Metric extraction: 24→4 facts on metric-heavy session (6x reduction). ~20% residual metric leak in hybrid facts.
+
+**Known limitations:**
+- Qwen 3.5 (extraction model) can't reliably apply principles — needs explicit examples. Enumerated source list restored alongside the principle.
+- Qwen 3.5 doesn't generate `lookup_path` routing pointers — deterministic seeding covers the gap.
+- Category hit rate was 44% on the 50-session backfill (cold start with new schema). Will be 100% going forward.
+
+**Not shipped (session memory — main ADR-007):**
+- Session summaries, embedding storage, semantic recall still proposed. The category taxonomy was the prerequisite disambiguation layer.
 
 ## Consequences
 
