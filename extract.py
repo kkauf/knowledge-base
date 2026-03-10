@@ -39,15 +39,26 @@ SYSTEM_PROMPT = """You are a knowledge extraction system for a solopreneur's per
 THE CORE PRINCIPLE:
 If a fact can be looked up from a better source, DO NOT extract it. The knowledge base exists for things that live NOWHERE ELSE.
 
-CANONICAL SOURCES (do NOT extract facts queryable from these):
-- Codebase: file names, components, function signatures, architecture → grep/git
-- Git history: what was changed, refactored, fixed, deployed → git log
-- Linear: ticket status, assignments, sprint planning → Linear API
-- Google Calendar: events, schedules, availability → Calendar API
-- Metabase: ALL KH business metrics — conversion rates, CPL, CAC, CLV, revenue, spend, booking counts, cohort sizes, funnel data → `metabase-pull.ts` script pulls live data from pre-built dashboard queries
-- Supabase: database state, record counts, table contents → SQL queries
-- Vercel: deployment config, env vars, build settings → Vercel dashboard
-- Notion Konban: task status, what's in progress → Konban API
+CANONICAL SOURCE PRINCIPLE:
+Before extracting any fact, ask: "Can this be looked up from a live system in one hop?"
+
+If YES → DON'T extract the fact. Instead, extract HOW to find it:
+  ✅ "Levent's session data → Supabase: SELECT * FROM cal_bookings WHERE therapist = 'Levent'"
+  ✅ "KH deployment status → Vercel dashboard or `vercel ls`"
+  ✅ "February invoice status → check Stripe dashboard for therapist X"
+
+If NO → Extract the fact:
+  ✅ "Mason is Katherine's brother" (no live system stores family relationships)
+  ✅ "Oz has a bite history — Cornell position is behavioral euthanasia"
+
+You don't need an enumerated list of sources. Use your judgment:
+- Database tables, API endpoints, dashboards, git repos = live queryable sources
+- Relationships, decisions, preferences, biographical facts = no canonical source
+- Calendar events, task statuses = live source exists (don't cache)
+- What someone SAID or DECIDED = no live source (extract it)
+
+When you extract a routing pointer instead of a fact, use the attribute format:
+  lookup_path: "description of how to find this information"
 
 The test: "Can Claude get a current version of this fact by querying a tool?" If yes, don't extract the number — extract the TOOL KNOWLEDGE (how to query it) or the STRUCTURAL FACT (what KH considers important) instead.
 

@@ -160,9 +160,12 @@ def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
     if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
         return {"status": "failed", "reason": "Konban script not available"}
     title = action.get("title") or action.get("target", "Untitled")
-    # Tag all daemon-created tasks
+    # Tag all daemon-created tasks with category for disambiguation
+    category = action.get("category", "")
+    sub_cat = action.get("sub_category", "")
+    cat_tag = f"[{category}/{sub_cat}] " if sub_cat else (f"[{category}] " if category else "")
     if "[daemon]" not in title:
-        title = f"[daemon] {title}"
+        title = f"[daemon] {cat_tag}{title}"
 
     # Domain guard: skip implementation-level dev tasks (belong in Linear, not Konban)
     domain = action.get("domain", "")

@@ -121,12 +121,29 @@ If a <tool_errors> section is included below the transcript, it contains STRUCTU
 
 If the transcript contains a section marked "[--- CONTEXT FROM PREVIOUS EXTRACTION ---]", that section is already processed. Only extract artifacts from the "[--- NEW MESSAGES BELOW ---]" section. Use the context section only for understanding references in the new messages.
 
+CATEGORY CLASSIFICATION (required on every artifact):
+Classify each artifact into the taxonomy below. The taxonomy is a disambiguation
+hint, not a rigid ontology — create new sub-categories when needed.
+
+Personal: Health | Sports | Baking | Family | Home | Finance | Education | Travel | Pets
+Business/KH: Product | Therapists | Billing | Marketing | Infrastructure
+Business/Consulting: [client name as sub-category]
+Business/KE: LLC admin | Legal | Brand
+Infrastructure: Knowledge Base | Claude Config | Automation
+
+Include 3-5 key_terms that distinguish this artifact from others in the same category.
+The CONTENT determines category, not the mechanism — "ordering supplements" is Health
+(the content), not Finance (the transaction).
+
 Return ONLY valid JSON:
 {
   "artifacts": [
     {
       "type": "analysis",
       "title": "Short descriptive title",
+      "category": "Personal",
+      "sub_category": "Health",
+      "key_terms": ["supplements", "Micro Ingredients", "order"],
       "summary": "1-2 sentence summary for the pending queue (NOT the artifact itself)",
       "value": "very_high",
       "persistence_status": "not_persisted | persisted | partial",

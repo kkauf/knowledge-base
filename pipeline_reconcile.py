@@ -130,6 +130,17 @@ RULES:
     - user_correction → Claude used the right tool but wrong parameters for the context (e.g., wrong email account, wrong database). The user's correction text contains the fix. Propose fix_skill to add routing rules, parameter defaults, or disambiguation guidance to the relevant SKILL.md.
 - Be conservative — when in doubt, propose no_action rather than creating noise
 
+CATEGORY-AWARE MATCHING (prevents cross-category false positives):
+Each artifact includes category, sub_category, and key_terms.
+
+Before matching an artifact to a Konban task:
+1. Mentally classify each Konban task using the same taxonomy (from title + description)
+2. Only match when artifact and task share the same category/sub-category
+3. If no task matches the artifact's category → no_action (don't force a match)
+
+"Ordering supplements" (Personal/Health) must NOT match "Backup Payment Method"
+(Personal/Finance) — same domain, different category, different intent.
+
 ENRICHMENT vs CREATION decision:
 - CHECK THE BRAIN DOCUMENT INDEX before proposing create_brain_doc. If any existing doc covers the same topic or entity, use enrich_brain_doc instead.
 - Fuzzy match on topic: "Research: User Interview Implications" covers the same topic as an artifact titled "What the User Interview Tells You About the SaaS Product" — these are the SAME topic. Use enrich, not create.
@@ -268,6 +279,8 @@ Return ONLY valid JSON:
       "source_artifact": "artifact title this action comes from",
       "artifact_group": "shared ID linking actions from the same artifact (e.g. 'user-interview')",
       "brain_doc": "title of the Brain doc this task relates to (for create_konban_task from decomposition)",
+      "category": "artifact category (pass through from artifact for create_konban_task)",
+      "sub_category": "artifact sub-category (pass through from artifact for create_konban_task)",
       "confidence": "high | medium | low (REQUIRED — see confidence scoring rules)",
       "rationale": "why this action (include staleness assessment and confidence justification)",
       "skill": "skill directory name (for fix_skill only)",
@@ -620,7 +633,9 @@ def _build_domain_preamble(artifacts_json: str) -> str:
         domain = a.get("_meta", {}).get("domain") or a.get("domain", "unknown")
         atype = a.get("type", "unknown")
         title = a.get("title", "untitled")[:80]
-        lines.append(f"  [{i}] domain={domain} type={atype} — \"{title}\"")
+        cat_str = f"{a.get('category', '')}/{a.get('sub_category', '')}"
+        terms = ", ".join(a.get("key_terms", [])[:5])
+        lines.append(f"  [{i}] domain={domain} category={cat_str} type={atype} terms=[{terms}] — \"{title}\"")
 
     lines.append("")
     lines.append("Routing reminders:")
