@@ -106,9 +106,12 @@ EXTRACT (things without another canonical source):
   "Greenback Tax Services [advises] Konstantin — existing relationship"
 - BUSINESS RULES & POLICIES: Commission rates, pricing tiers, eligibility criteria, legal structures
   "Platform commission: 15% for verified therapists, 25% for unverified"
-- NAVIGATIONAL KNOWLEDGE: Where non-code things live (GDrive folders, Notion pages, booking links)
-  "Consulting client files at GDrive - KEPersonal:Consulting/[Client]/"
-  "Booking links: cal.com/kkauf/ — 45min, 30min, 20min, 15min variants"
+- NAVIGATIONAL KNOWLEDGE: Where documents, files, and resources live — GDrive, Notion, local file paths, booking links. These are critical for future retrieval. When a conversation references, creates, or discovers a file/document associated with an entity, extract the location as a fact.
+  ✅ entity="Sky Hill Farm", attribute="project_tracker", value="/Users/kkaufmann/.../Cazenovia_House_Purchase.md"
+  ✅ entity="Kampschulte Consulting", attribute="relationship_log", value="GDrive - KEPersonal:Consulting/Kampschulte/20260110 Kampschulte - Relationship Log.docx"
+  ✅ entity="Post-Intro Patient Journey", attribute="brain_doc", value="Notion Brain: patient-journey-post-intro.md"
+  ✅ entity="Consulting", attribute="drive_folder", value="GDrive - KEPersonal:Consulting/"
+  When a file MOVES or a new version replaces an old one, use "supersedes" to update the location — stale paths are worse than missing paths. Use descriptive attribute names: project_tracker, relationship_log, brief, drive_path, brain_doc, document_location — not just "file".
 - PERSONAL ASSETS & PURCHASES: Equipment, property, subscriptions, significant purchases — with brand, model, date, and use case
   "Bought REP tube resistance bands with handles, $22, for shoulder rehab exercises at desk"
   "Ordered 16kg kettlebell from Rep Fitness, $75, for movement breaks between work blocks"
@@ -119,6 +122,11 @@ EXTRACT (things without another canonical source):
   "Sauna project: planning phase, target late fall 2026"
 - STRATEGIC DECISIONS: Business direction, pricing, positioning, partnerships
   "Free + Pro tier model at EUR 19/month — unanimous 5/5 agent consensus"
+- ALIASES: When the user refers to an entity by a colloquial name, nickname, or shorthand DIFFERENT from its canonical name, extract an aliases fact. This is critical for future retrieval — without aliases, the knowledge base can't find entities when users use informal names.
+  ✅ entity="Sky Hill Farm", attribute="aliases", value="farmhouse, family farmhouse, the property, Katherine's parents' house"
+  ✅ entity="Kaufmann Health", attribute="aliases", value="KH, the platform, the directory"
+  ✅ entity="Konstantin Kaufmann", attribute="aliases", value="K, Konstantin"
+  Only extract aliases that are genuinely different from the canonical name. Don't extract the canonical name itself as an alias. Comma-separate multiple aliases in one fact value.
 
 DO NOT EXTRACT (things with a better canonical source):
 - CODE ARTIFACTS: File names, component names, function signatures, line counts, file paths within a codebase
