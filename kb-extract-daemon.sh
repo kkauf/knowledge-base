@@ -114,41 +114,70 @@ for entry in "${SORTED[@]}"; do
 
     log "Processing: $SESSION (${AGE}s old)"
 
-    # Use --session flag for proper JSONL parsing
-    python3 "$EXTRACT" --session "$SESSION" >> "$LOG" 2>&1
-    EXIT_CODE=$?
+    # Pre-filter: classify session to decide which pipeline stages to run
+    PREFILTER="$REPO_DIR/session_prefilter.py"
+    SKIP_FACTS=false
+    SKIP_ARTIFACTS=false
+    if [ -f "$PREFILTER" ]; then
+        CLASSIFY_OUTPUT=$(python3 -c "
+import sys; sys.path.insert(0, '$REPO_DIR')
+from session_prefilter import quick_classify
+s = quick_classify('$SESSION')
+print(f'skip_facts={s[\"skip_facts\"]} skip_artifacts={s[\"skip_artifacts\"]} user={s[\"user_chars\"]} asst={s[\"asst_chars\"]} msgs={s[\"msg_count\"]} sub={s[\"is_subagent\"]}')
+" 2>/dev/null)
+        if [ -n "$CLASSIFY_OUTPUT" ]; then
+            log "Classify: $CLASSIFY_OUTPUT"
+            [[ "$CLASSIFY_OUTPUT" == *"skip_facts=True"* ]] && SKIP_FACTS=true
+            [[ "$CLASSIFY_OUTPUT" == *"skip_artifacts=True"* ]] && SKIP_ARTIFACTS=true
+        fi
+    fi
 
-    if [ "$EXIT_CODE" -eq 0 ]; then
-        log "Fact extraction complete: $(basename "$SESSION")"
+    # Skip both stages → advance offset without LLM calls
+    if $SKIP_FACTS && $SKIP_ARTIFACTS; then
+        log "Skipped (pre-filter: no signal): $(basename "$SESSION")"
         PROCESSED=$((PROCESSED + 1))
         if [ "$MOD_TIME" -gt "$LATEST_PROCESSED_TIME" ]; then
             LATEST_PROCESSED_TIME=$MOD_TIME
         fi
+        SKIPPED=$((SKIPPED + 1))
+        continue
+    fi
 
-        # Stage 1: Artifact extraction (runs alongside fact extraction)
-        # Uses separate offset tracking and GLM-5 model
-        if [ -f "$ARTIFACT_EXTRACT" ]; then
-            log "Running artifact extraction: $(basename "$SESSION")"
-            python3 "$ARTIFACT_EXTRACT" --session "$SESSION" >> "$LOG" 2>&1
-            ART_EXIT=$?
-            if [ "$ART_EXIT" -eq 0 ]; then
-                log "Artifact extraction complete: $(basename "$SESSION")"
-            else
-                # Artifact extraction failure is non-critical — don't stop the daemon
-                log "Artifact extraction failed (exit $ART_EXIT): $(basename "$SESSION") — continuing"
-            fi
-        fi
-    elif [ "$EXIT_CODE" -eq 2 ]; then
-        # Exit code 2 = empty transcript or no data — skip and advance past it
-        log "Skipped (empty/no data): $(basename "$SESSION")"
-        if [ "$MOD_TIME" -gt "$LATEST_PROCESSED_TIME" ]; then
-            LATEST_PROCESSED_TIME=$MOD_TIME
-        fi
+    # Fact extraction (skipped for tiny subagent sessions)
+    if $SKIP_FACTS; then
+        log "Fact extraction skipped (subagent, <1500 user chars): $(basename "$SESSION")"
     else
-        # Exit code 1 = API/extraction error — stop and retry next run
-        log "Extraction FAILED (exit $EXIT_CODE): $(basename "$SESSION") — stopping, will retry next run"
-        FAILED=$((FAILED + 1))
-        break
+        python3 "$EXTRACT" --session "$SESSION" >> "$LOG" 2>&1
+        EXIT_CODE=$?
+
+        if [ "$EXIT_CODE" -eq 0 ]; then
+            log "Fact extraction complete: $(basename "$SESSION")"
+        elif [ "$EXIT_CODE" -eq 2 ]; then
+            log "Fact extraction skipped (empty/no data): $(basename "$SESSION")"
+        else
+            log "Extraction FAILED (exit $EXIT_CODE): $(basename "$SESSION") — stopping, will retry next run"
+            FAILED=$((FAILED + 1))
+            break
+        fi
+    fi
+
+    PROCESSED=$((PROCESSED + 1))
+    if [ "$MOD_TIME" -gt "$LATEST_PROCESSED_TIME" ]; then
+        LATEST_PROCESSED_TIME=$MOD_TIME
+    fi
+
+    # Artifact extraction (skipped if no long assistant messages)
+    if $SKIP_ARTIFACTS; then
+        log "Artifact extraction skipped (no long assistant msgs): $(basename "$SESSION")"
+    elif [ -f "$ARTIFACT_EXTRACT" ]; then
+        log "Running artifact extraction: $(basename "$SESSION")"
+        python3 "$ARTIFACT_EXTRACT" --session "$SESSION" >> "$LOG" 2>&1
+        ART_EXIT=$?
+        if [ "$ART_EXIT" -eq 0 ]; then
+            log "Artifact extraction complete: $(basename "$SESSION")"
+        else
+            log "Artifact extraction failed (exit $ART_EXIT): $(basename "$SESSION") — continuing"
+        fi
     fi
 done
 

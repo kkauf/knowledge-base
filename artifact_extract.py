@@ -426,6 +426,14 @@ def main():
     # We temporarily swap the offset file to use our own
     from extract import _parse_all_messages, CONTEXT_OVERLAP
 
+    # Pre-filter: compress transcript for artifact extraction
+    artifact_filter = None
+    try:
+        from session_prefilter import filter_for_artifacts
+        artifact_filter = filter_for_artifacts
+    except ImportError:
+        pass  # Graceful degradation
+
     session_path = args.session
     session_key = os.path.basename(session_path)
 
@@ -458,6 +466,13 @@ def main():
             context_msgs = all_messages[context_start:new_start]
             new_msgs = all_messages[new_start:]
 
+        # Apply artifact filter: keep long assistant messages + triggering user context
+        pre_filter_chars = sum(len(m['content']) for m in new_msgs)
+        if artifact_filter:
+            context_msgs = artifact_filter(context_msgs) if context_msgs else []
+            new_msgs = artifact_filter(new_msgs)
+        post_filter_chars = sum(len(m['content']) for m in new_msgs)
+
         # Build transcript with context separator
         parts = []
         if context_msgs:
@@ -476,7 +491,8 @@ def main():
 
         msg_count = len(new_msgs)
         ctx_count = len(context_msgs)
-        print(f"Incremental: {msg_count} new messages, {ctx_count} context overlap")
+        compression = f" (filtered from {pre_filter_chars:,} to {post_filter_chars:,} chars)" if artifact_filter else ""
+        print(f"Incremental: {msg_count} new messages, {ctx_count} context overlap{compression}")
 
     if not transcript.strip():
         print("Empty transcript.")

@@ -1075,19 +1075,25 @@ def _classify_error_type(failed_cmd: str, error_text: str, success_cmd: str = No
     return "other"
 
 
-def parse_session_jsonl(session_path: str) -> str:
+def parse_session_jsonl(session_path: str, message_filter=None) -> str:
     """Parse a Claude Code JSONL session file into a readable transcript.
 
     Non-incremental mode: returns ALL messages (truncation to max_transcript_chars
     happens downstream in main()). Previously limited to last 50 messages, which
     silently dropped early-session facts during backfill re-extraction.
+
+    Args:
+        message_filter: Optional callable(messages) -> messages to compress the
+            transcript before formatting. Used by the pre-filter pipeline.
     """
     messages = _parse_all_messages(session_path)
+    if message_filter:
+        messages = message_filter(messages)
     texts = [f"[{m['role']}]: {m['content']}" for m in messages]
     return "\n\n".join(texts)
 
 
-def parse_session_incremental(session_path: str) -> tuple[str, int, int]:
+def parse_session_incremental(session_path: str, message_filter=None) -> tuple[str, int, int]:
     """Parse a session incrementally using offset tracking.
 
     Returns (transcript, new_start_index, new_end_index) where:
@@ -1098,6 +1104,10 @@ def parse_session_incremental(session_path: str) -> tuple[str, int, int]:
 
     If no previous offset exists, falls back to processing the last 50 messages
     (same as legacy behavior for first run).
+
+    Args:
+        message_filter: Optional callable(messages) -> messages to compress the
+            transcript before formatting. Used by the pre-filter pipeline.
     """
     session_key = os.path.basename(session_path)
     offsets = _load_session_offsets()
@@ -1128,6 +1138,11 @@ def parse_session_incremental(session_path: str) -> tuple[str, int, int]:
         context_start = max(0, new_start - CONTEXT_OVERLAP)
         context_msgs = all_messages[context_start:new_start]
         new_msgs = all_messages[new_start:]
+
+    # Apply message filter to compress transcript per pipeline stage
+    if message_filter:
+        context_msgs = message_filter(context_msgs) if context_msgs else []
+        new_msgs = message_filter(new_msgs)
 
     # Build transcript with context separator
     parts = []
@@ -1208,6 +1223,14 @@ def main():
     session_path_for_offset = None
     new_end_offset = -1
 
+    # Pre-filter: compress transcript for fact extraction (gems pattern)
+    fact_filter = None
+    try:
+        from session_prefilter import filter_for_facts
+        fact_filter = filter_for_facts
+    except ImportError:
+        pass  # Graceful degradation
+
     # Get transcript
     if args.input:
         with open(args.input) as f:
@@ -1215,9 +1238,10 @@ def main():
         source = args.source or f"file:{os.path.basename(args.input)}"
     elif args.session:
         if args.no_incremental:
-            transcript = parse_session_jsonl(args.session)
+            transcript = parse_session_jsonl(args.session, message_filter=fact_filter)
         else:
-            transcript, new_start, new_end_offset = parse_session_incremental(args.session)
+            transcript, new_start, new_end_offset = parse_session_incremental(
+                args.session, message_filter=fact_filter)
             session_path_for_offset = args.session
             if not transcript.strip():
                 print(f"No new messages in session (offset at {new_end_offset})")
@@ -1266,18 +1290,12 @@ def main():
     except ImportError:
         pass
 
-    # Load dynamic context frame (active commitments, priorities)
-    context_frame = ""
-    try:
-        from context_frame import load_context_frame
-        context_frame = load_context_frame()
-        if context_frame:
-            print(f"Context frame: {len(context_frame)} chars")
-    except ImportError:
-        pass  # Graceful degradation if context_frame.py not available
+    # Context frame: skipped for fact extraction (saves ~4K tokens/call).
+    # Facts are entity/relation-based — they don't need awareness of active commitments.
+    # Context frame is still used by artifact extraction (commitment_update detection).
     print()
 
-    # Extract — combine domain context with context frame and linked task
+    # Extract — combine domain context with linked task (no context frame)
     combined_context = domain_context
     if linked_task:
         task_hint = (
@@ -1291,10 +1309,6 @@ def main():
             combined_context = task_hint + "\n" + combined_context
         else:
             combined_context = task_hint
-    if context_frame:
-        if combined_context:
-            combined_context += "\n\n"
-        combined_context += context_frame
     extractions = call_extraction_model(transcript, args.model, combined_context)
 
     # Display
