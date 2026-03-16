@@ -128,6 +128,7 @@ RULES:
     - output_truncation → fix_skill (patch_type: report_bug) — helper script truncates needed data
     - identical_retry → context-dependent: if corroborated, route to appropriate fix; standalone → document expected output in SKILL.md
     - user_correction → Claude used the right tool but wrong parameters for the context (e.g., wrong email account, wrong database). The user's correction text contains the fix. Propose fix_skill to add routing rules, parameter defaults, or disambiguation guidance to the relevant SKILL.md.
+- If the skill name does NOT EXIST (marked NONEXISTENT in system state), ALWAYS propose no_action. These are hallucinated category names, not real skills.
 - Be conservative — when in doubt, propose no_action rather than creating noise
 
 CATEGORY-AWARE MATCHING (prevents cross-category false positives):
@@ -398,7 +399,8 @@ def load_relevant_skill_docs(artifacts: list) -> str:
     """Load SKILL.md files referenced by error_pattern artifacts.
 
     Returns a formatted string with all relevant skill docs for injection
-    into the reconciliation prompt.
+    into the reconciliation prompt. Skills that don't exist are surfaced
+    with a NONEXISTENT warning so the LLM routes them to no_action.
     """
     skill_names = set()
     for a in artifacts:
@@ -412,15 +414,26 @@ def load_relevant_skill_docs(artifacts: list) -> str:
         return ""
 
     sections = []
+    nonexistent = []
     for skill in sorted(skill_names):
         doc = load_skill_doc(skill)
         if doc:
             sections.append(f"### SKILL.md: {skill}\n\n{doc}")
+        else:
+            nonexistent.append(skill)
 
-    if not sections:
-        return ""
+    parts = []
+    if nonexistent:
+        parts.append(
+            "## NONEXISTENT SKILLS (no SKILL.md found — ALWAYS propose no_action for these)\n\n"
+            + ", ".join(nonexistent)
+            + "\n\nThese skill names were invented by the extraction LLM and do not correspond to "
+            "any real skill directory. Do NOT propose fix_skill for them."
+        )
+    if sections:
+        parts.append("## Relevant SKILL.md Documents\n\n" + "\n\n---\n\n".join(sections))
 
-    return "## Relevant SKILL.md Documents\n\n" + "\n\n---\n\n".join(sections)
+    return "\n\n".join(parts)
 
 
 def load_system_state(artifacts: list = None) -> str:

@@ -34,7 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (get_openrouter_url, get_reconciliation_model, get_kb_dir,
                     get_pending_file, get_artifact_offsets_file, get_api_key,
-                    get_http_referer)
+                    get_http_referer, get_skills_dir)
 from extract import (
     parse_session_jsonl,
     parse_session_incremental,
@@ -54,6 +54,31 @@ ARTIFACT_OFFSETS_FILE = get_artifact_offsets_file()
 
 # Separate offset tracking from fact extraction — they may run at different
 # cadences or one may fail while the other succeeds.
+
+# --- Skill Inventory ---
+
+def _build_skill_inventory() -> list[str]:
+    """Discover valid skill names from the filesystem."""
+    skills_dir = Path(get_skills_dir())
+    if not skills_dir.exists():
+        return []
+    return sorted([d.name for d in skills_dir.iterdir()
+                   if d.is_dir() and (d / "SKILL.md").exists()])
+
+
+def _build_extraction_prompt() -> str:
+    """Build extraction prompt with dynamic skill inventory injected."""
+    skills = _build_skill_inventory()
+    if skills:
+        skill_block = (
+            "\n\nVALID SKILL NAMES (use ONLY these for error_pattern \"skill\" field, or null if none match):\n"
+            + ", ".join(skills)
+            + "\n\nDo NOT invent skill names. If the error doesn't map to one of these skills, set \"skill\" to null."
+        )
+    else:
+        skill_block = ""
+    return EXTRACTION_PROMPT + skill_block
+
 
 # --- Artifact Extraction Prompt ---
 
@@ -181,7 +206,7 @@ Return ONLY valid JSON:
 }
 
 For error_patterns:
-- "skill": the skill directory name (e.g., "konban", "linear", "gcal")
+- "skill": one of the VALID SKILL NAMES listed below, or null if none match. NEVER invent skill names like "infrastructure", "supabase", "knowledge-base", etc.
 - "script": the helper script filename (e.g., "notion-api.py", "linear-api.py")
 - "error_type": classify the issue:
   * Hard errors: wrong_arg_type (string where int expected), invalid_value ("High" when "3" needed), case_sensitivity ("feature" vs "Feature"), missing_flag (flag doesn't exist)
@@ -270,7 +295,7 @@ def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL,
     payload = json.dumps({
         "model": model,
         "messages": [
-            {"role": "system", "content": EXTRACTION_PROMPT},
+            {"role": "system", "content": _build_extraction_prompt()},
             {"role": "user", "content": user_content}
         ],
         "temperature": 0.1,  # Low temp for precision

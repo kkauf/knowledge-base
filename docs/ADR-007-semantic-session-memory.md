@@ -312,6 +312,12 @@ Both cases: let LLMs do LLM work, but give them structure so they do it well.
 - Qwen 3.5 doesn't generate `lookup_path` routing pointers — deterministic seeding covers the gap.
 - Category hit rate was 44% on the 50-session backfill (cold start with new schema). Will be 100% going forward.
 
+**Shipped (skill-fix routing — Mar 16, 2026):**
+- `artifact_extract.py`: Dynamic skill inventory injected into extraction prompt. LLM can only assign error_patterns to real skills (or null). Discovers valid skills from filesystem (`SKILL.md` exists).
+- `pipeline_reconcile.py`: Nonexistent skill names surfaced as "NONEXISTENT SKILLS" warning in reconciliation state. Prompt rule forces `no_action` for these.
+- `executor.py`: Hard guard blocks `fix_skill` for skills without `SKILL.md`. 14-day TTL cleanup on skill proposals.
+- Root cause: extraction LLM had no skill inventory, so it inferred category-like names ("infrastructure", "supabase", "knowledge-base"). 22 of 27 pending fixes were waste.
+
 **Not shipped (session memory — main ADR-007):**
 - Session summaries, embedding storage, semantic recall still proposed. The category taxonomy was the prerequisite disambiguation layer.
 

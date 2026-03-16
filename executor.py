@@ -26,7 +26,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # --- Paths ---
@@ -643,9 +643,10 @@ def _apply_skill_patch(skill: str, patch_type: str, section_heading: str = None,
 
 
 def _save_skill_proposal(proposal: dict) -> bool:
-    """Save a skill fix proposal with dedup check.
+    """Save a skill fix proposal with dedup check and TTL cleanup.
 
     Returns True if saved, False if duplicate.
+    Drops proposals older than 14 days on each save.
     """
     review_path = get_skill_fixes_file()
     existing = []
@@ -654,6 +655,13 @@ def _save_skill_proposal(proposal: dict) -> bool:
             existing = json.loads(review_path.read_text())
         except json.JSONDecodeError:
             existing = []
+
+    # TTL cleanup: drop proposals older than 14 days
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+    pre_ttl = len(existing)
+    existing = [p for p in existing if p.get("timestamp", "") >= cutoff]
+    if len(existing) < pre_ttl:
+        print(f"  TTL cleanup: dropped {pre_ttl - len(existing)} stale proposal(s)")
 
     # Dedup: same skill + same new_content = skip
     for ex in existing:
@@ -674,6 +682,13 @@ def execute_fix_skill(action: dict, dry_run: bool) -> dict:
     Medium-confidence, non-additive, or report_bug patches are saved as proposals.
     """
     skill = action.get("skill") or action.get("target", "unknown")
+
+    # Guard: skip proposals for nonexistent skills
+    skills_dir = get_skills_dir()
+    if skills_dir:
+        skill_path_check = Path(skills_dir) / skill / "SKILL.md"
+        if not skill_path_check.exists():
+            return {"status": "skipped", "reason": f"Skill '{skill}' does not exist (no SKILL.md)"}
     patch_type = action.get("patch_type", "")
     section_heading = action.get("section_heading")
     anchor_text = action.get("anchor_text")
