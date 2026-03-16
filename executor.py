@@ -450,6 +450,40 @@ def execute_create_brain_doc(action: dict, dry_run: bool) -> dict:
                 "reason": f"Brain doc skipped — domain '{domain}' is not KH",
                 "title": title}
 
+    # Implementation artifact guard: block docs that belong in git/Linear, not the Brain.
+    # These patterns match the BRAIN DOC EXCLUSIONS in the reconciliation prompt,
+    # but the LLM doesn't reliably follow them — enforce in code.
+    _IMPL_KEYWORDS = {
+        "e2e test", "test failure", "test gap", "test pattern", "test suite",
+        "test coverage", "bug analysis", "root cause analysis", "post-mortem",
+        "postmortem", "overflow analysis", "layout analysis", "mobile optimization",
+        "serialization", "race condition", "desync", "cron failure",
+        "webhook handler", "webhook scoping", "api contract",
+        "implementation plan", "implementation analysis",
+        "data flow analysis", "filter failure", "filter analysis",
+        "architecture audit", "email template", "rfc 2606",
+        "integration audit", "integration and strategy audit",
+        "database audit", "data processing audit",
+        "event tracking", "logic audit", "compliance audit",
+    }
+    title_lower = title.lower()
+    for kw in _IMPL_KEYWORDS:
+        if kw in title_lower:
+            return {"status": "skipped",
+                    "reason": f"Brain doc blocked — implementation artifact (matched '{kw}')",
+                    "title": title}
+
+    # Broader heuristic: titles dense with code/debug terms are implementation, not strategy
+    _TECH_TERMS = {"api", "webhook", "cron", "endpoint", "schema", "migration",
+                   "e2e", "css", "html", "tsx", "sql", "rls", "jwt",
+                   "desync", "mutex", "deadlock", "regex", "parsing",
+                   "audit", "filter", "sms", "email"}
+    tech_word_count = sum(1 for w in title_lower.split() if w.strip("():,-") in _TECH_TERMS)
+    if tech_word_count >= 2:
+        return {"status": "skipped",
+                "reason": f"Brain doc blocked — too many tech terms ({tech_word_count}) in title",
+                "title": title}
+
     # Add daemon header
     full_content = f"*Created by reconciliation daemon — source: {source}*\n\n{content}"
 
