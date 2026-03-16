@@ -202,7 +202,12 @@ Return ONLY valid JSON:
       "doc_gap": true
     }
   ],
-  "session_summary": "1-2 sentence summary of the overall session"
+  "session_summary": "1-2 sentence summary of the overall session",
+  "session_memory": {
+    "one_liner": "Compressed recall line (<100 chars)",
+    "topics": ["topic1", "topic2"],
+    "summary": "Topic-organized prose (50-300 words). Entities, decisions, personal knowledge."
+  }
 }
 
 For error_patterns:
@@ -215,6 +220,31 @@ For error_patterns:
   * Fallback: other
 - "correct_usage": the CORRECT way to invoke the command (from the successful retry or your analysis). For inefficient_lookup, include the correct entity name/search term.
 - "doc_gap": true if this issue is likely because the SKILL.md documentation is missing or unclear about this constraint (e.g., valid project names, exact entity names, API shape). false if the info is probably already documented and Claude just ignored it.
+
+SESSION MEMORY (always produce — even if no artifacts found):
+Beyond the 1-2 sentence session_summary, produce a "session_memory" object that captures
+knowledge with LASTING VALUE beyond the session. This is the permanent record — if you don't
+capture it, it's lost forever.
+
+"session_memory": {
+  "one_liner": "Compressed 1-line version for recall injection (<100 chars). What happened + key outcome.",
+  "topics": ["topic1", "topic2"],
+  "summary": "Topic-organized prose paragraphs (50-300 words). Include: entities mentioned, decisions made, personal knowledge, commitments, outcomes. Organize by topic, not chronologically. Skip pure code/ops work. If nothing worth remembering, return empty string."
+}
+
+What to capture in session_memory:
+- Personal knowledge: purchases, plans, health, family context, schedules
+- Decisions and their rationale (why, not just what)
+- Commitments: what was promised, to whom, by when
+- Strategic insights: market findings, pricing decisions, competitive analysis
+- Navigational knowledge: where things were saved, document locations
+- Status changes: what shipped, what broke, what was deferred
+
+What to skip:
+- Pure code changes (already in git)
+- Tool output / API responses
+- Debugging narratives
+- Ephemeral task coordination
 
 If no artifacts or error patterns found, return empty arrays. Do NOT hallucinate artifacts that aren't in the transcript."""
 
@@ -547,6 +577,7 @@ def main():
     artifacts = result.get("artifacts", [])
     errors = result.get("error_patterns", [])
     summary = result.get("session_summary", "")
+    session_memory = result.get("session_memory", {})
 
     # Post-processing: filter garbage artifacts (no title, "?" title, single-char title)
     pre_filter = len(artifacts)
@@ -559,6 +590,8 @@ def main():
     print(f"Found: {len(artifacts)} artifact(s), {len(errors)} error pattern(s)")
     if summary:
         print(f"Session: {summary}")
+    if session_memory.get("one_liner"):
+        print(f"Memory:  {session_memory['one_liner']}")
     print()
 
     for a in artifacts:
@@ -598,6 +631,26 @@ def main():
         print(f"Saved {count} artifact(s) to pending file")
     else:
         print("No actionable artifacts to save (all persisted or low value)")
+
+    # Store session memory (ADR-007)
+    if session_memory.get("summary") or session_memory.get("one_liner"):
+        try:
+            from session_memory import init_db as sm_init, store_summary, get_db as sm_get_db
+            sm_db = sm_get_db()
+            sm_init(sm_db)
+            stored = store_summary(
+                sm_db,
+                session_path=session_path,
+                domain=domain,
+                summary=session_memory.get("summary", ""),
+                one_liner=session_memory.get("one_liner", ""),
+                topics=session_memory.get("topics", []),
+            )
+            sm_db.close()
+            if stored:
+                print(f"Session memory stored ({len(session_memory.get('summary', ''))} chars)")
+        except Exception as e:
+            print(f"Warning: session memory storage failed: {e}", file=sys.stderr)
 
     # Save offset after successful extraction
     if new_end_offset >= 0:
