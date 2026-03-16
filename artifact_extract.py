@@ -245,6 +245,13 @@ What to skip:
 - Tool output / API responses
 - Debugging narratives
 - Ephemeral task coordination
+- Content that was ALREADY WRITTEN to documents, Brain, or files during the session
+  (check the ALREADY PERSISTED list if provided — those are the gap boundaries)
+
+DEDUPLICATION RULE: If the session wrote to documents/Brain/files (listed in ALREADY PERSISTED),
+the session_memory should capture CONTEXT and MOTIVATION — not repeat the content.
+Good: "Updated autism profile with new meltdown patterns identified in conversation with Katherine"
+Bad: [repeating the actual profile content that was already written to the file]
 
 If no artifacts or error patterns found, return empty arrays. Do NOT hallucinate artifacts that aren't in the transcript."""
 
@@ -277,16 +284,81 @@ def _set_artifact_offset(session_path: str, offset: int):
     _save_artifact_offsets(offsets)
 
 
+# --- Persistence signal detection ---
+
+def _detect_persistence_signals(session_path: str) -> list[str]:
+    """Detect what was written to external systems during a session.
+
+    Parses tool_use blocks for Brain/Notion writes, file edits (MEMORY.md, docs/,
+    SKILL.md), git commits, and Konban/Linear task creation. Returns human-readable
+    list of what's already persisted, so the session_memory can focus on gaps.
+    """
+    signals = []
+    try:
+        with open(session_path) as f:
+            for line in f:
+                try:
+                    msg = json.loads(line)
+                    if msg.get("type") != "assistant":
+                        continue
+                    content = msg.get("message", {}).get("content", "")
+                    if not isinstance(content, list):
+                        continue
+                    for block in content:
+                        if not isinstance(block, dict) or block.get("type") != "tool_use":
+                            continue
+                        name = block.get("name", "")
+                        inp = block.get("input", {})
+                        # Notion/Brain writes
+                        if "notion" in name.lower() and any(
+                            w in name.lower() for w in ("create", "update")
+                        ):
+                            title = str(inp.get("title", inp.get("page_id", "")))[:50]
+                            signals.append(f"Notion write: {title}")
+                        # File edits — any .md/.txt/.json doc is persistence
+                        elif name in ("Edit", "Write"):
+                            path = inp.get("file_path", "")
+                            bname = os.path.basename(path)
+                            ext = os.path.splitext(path)[1].lower()
+                            # Skip source code files — those are git-tracked, not docs
+                            code_exts = {".ts", ".tsx", ".js", ".jsx", ".py", ".css",
+                                         ".html", ".sh", ".sql", ".yaml", ".yml"}
+                            if ext in (".md", ".txt") or any(
+                                k in path for k in ("MEMORY.md", "/docs/", "SKILL.md")
+                            ):
+                                signals.append(f"File write: {bname}")
+                            elif ext not in code_exts and bname not in ("package.json", "tsconfig.json"):
+                                signals.append(f"File write: {bname}")
+                        # Git commits
+                        elif name == "Bash":
+                            cmd = inp.get("command", "")
+                            if "git commit" in cmd:
+                                signals.append("Git commit")
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        pass
+    return list(dict.fromkeys(signals))  # dedupe preserving order
+
+
 # --- Model call ---
 
 def call_extraction_model(transcript: str, model: str = DEFAULT_MODEL,
                           context_frame: str = "", tool_errors: list = None,
-                          linked_task: dict = None) -> dict:
+                          linked_task: dict = None,
+                          persistence_signals: list = None) -> dict:
     """Call GLM-5 via OpenRouter to extract artifacts."""
     api_key = get_api_key()
 
     # Build user content with optional task link, context frame, and tool errors
     parts = []
+    if persistence_signals:
+        parts.append(
+            "ALREADY PERSISTED (these were written to external systems during the session — "
+            "session_memory should NOT duplicate this content, focus on gaps):\n"
+            + "\n".join(f"- {s}" for s in persistence_signals)
+            + "\n\n"
+        )
     if linked_task:
         parts.append(
             "LINKED TASK: This session is explicitly linked to a Konban task. "
@@ -565,14 +637,20 @@ def main():
     except Exception as e:
         print(f"Warning: tool error parsing failed: {e}", file=sys.stderr)
 
+    # Detect what was already persisted during the session (for session_memory dedup)
+    persistence_signals = _detect_persistence_signals(session_path)
+    if persistence_signals:
+        print(f"Persistence signals: {len(persistence_signals)} ({', '.join(persistence_signals[:3])}{'...' if len(persistence_signals) > 3 else ''})")
+
     print(f"Extracting artifacts from {len(transcript)} chars...")
     print(f"Model: {args.model} | Domain: {domain or 'unknown'}")
     print()
 
-    # Call model with context frame, tool errors, and linked task
+    # Call model with context frame, tool errors, linked task, and persistence signals
     result = call_extraction_model(transcript, args.model, context_frame,
                                     tool_errors=tool_errors if tool_errors else None,
-                                    linked_task=linked_task)
+                                    linked_task=linked_task,
+                                    persistence_signals=persistence_signals if persistence_signals else None)
 
     artifacts = result.get("artifacts", [])
     errors = result.get("error_patterns", [])
