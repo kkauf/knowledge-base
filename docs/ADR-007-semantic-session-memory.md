@@ -318,6 +318,17 @@ Both cases: let LLMs do LLM work, but give them structure so they do it well.
 - `executor.py`: Hard guard blocks `fix_skill` for skills without `SKILL.md`. 14-day TTL cleanup on skill proposals.
 - Root cause: extraction LLM had no skill inventory, so it inferred category-like names ("infrastructure", "supabase", "knowledge-base"). 22 of 27 pending fixes were waste.
 
+**Shipped (session pre-filter — Mar 16, 2026):**
+- `session_prefilter.py`: Deterministic transcript compression per pipeline stage. Zero LLM cost.
+  - `quick_classify()` gates which stages run: skips fact extraction for tiny subagent sessions (<1500 user chars), skips artifact extraction when no long assistant messages.
+  - `filter_for_facts()`: "Gems" pattern — full user messages + compressed assistant messages (first/last paragraphs). 35% smaller transcripts.
+  - `filter_for_artifacts()`: Only long assistant messages (>1500 chars) + triggering user context. 54% smaller transcripts.
+- `extract.py`: Uses fact filter, drops context frame (saves ~4K tokens/call — context frame only benefits artifact extraction).
+- `artifact_extract.py`: Uses artifact filter.
+- `kb-extract-daemon.sh`: Classification gate before LLM calls. Sessions that skip both stages advance offsets without any API calls.
+- Design from session-picker's `_extract_gems()` pattern: first + last text blocks carry signal, verbose middles are noise.
+- Impact: 29% fewer LLM calls + smaller transcripts. $41/month → ~$20/month (51% reduction). Quality verified identical across 4 test sessions.
+
 **Not shipped (session memory — main ADR-007):**
 - Session summaries, embedding storage, semantic recall still proposed. The category taxonomy was the prerequisite disambiguation layer.
 
