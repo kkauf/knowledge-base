@@ -142,9 +142,12 @@ Before matching an artifact to a Konban task:
 "Ordering supplements" (Personal/Health) must NOT match "Backup Payment Method"
 (Personal/Finance) — same domain, different category, different intent.
 
-ENRICHMENT vs CREATION decision:
+ENRICHMENT vs CREATION decision (CRITICAL — the #1 source of pipeline errors is unnecessary doc creation):
 - CHECK THE BRAIN DOCUMENT INDEX before proposing create_brain_doc. If any existing doc covers the same topic or entity, use enrich_brain_doc instead.
 - Fuzzy match on topic: "Research: User Interview Implications" covers the same topic as an artifact titled "What the User Interview Tells You About the SaaS Product" — these are the SAME topic. Use enrich, not create.
+- BROAD topic matching: "Therapist Outreach Data & Demand Analysis" is covered by BOTH "Cold Sales Outreach" AND "Therapist Outreach Expansion Strategy". An artifact about outreach ALWAYS enriches an existing outreach doc — don't create a third.
+- When multiple existing docs could be a home, pick the one whose description most closely matches the artifact's focus.
+- **Default to enrich_brain_doc unless you are 100% certain no existing doc covers the topic.** Creating a duplicate is worse than enriching the wrong doc. When in doubt, enrich.
 - If the artifact is a genuinely new TOPIC not covered by any existing doc, use create_brain_doc.
 - Enrichment is additive only — it appends a new section, never modifies existing content.
 - When enriching, choose a section_name that describes what's being added (e.g., "SaaS Product Implications", "Pre-Booking Gap Analysis").
@@ -246,11 +249,19 @@ PERMISSION MODEL (strict):
 - CANNOT: delete anything, modify Active Context, send external comms
 
 DOMAIN ROUTING (critical — route dev tasks to Linear, not Konban):
-- KH domain + dev-related keywords (component, endpoint, API, schema, refactor, dialog, form, view, tab, button, test, migration, hook, CSS, layout, route, query, mutation, resolver, seed, fixture) → create_linear_issue (NOT create_konban_task)
+- KH domain + dev-related keywords (component, endpoint, API, schema, refactor, dialog, form, view, tab, button, test, migration, hook, CSS, layout, route, query, mutation, resolver, seed, fixture, filter, matching, algorithm, tracking, attribution, propagate, fix, implement, add field) → create_linear_issue (NOT create_konban_task)
 - Only well-scoped, implementation-ready dev tasks → Linear. Vague/strategic items → Brain doc or no_action.
 - create_linear_issue fields: title (imperative, short), priority (1=Urgent, 2=High, 3=Medium, 4=Low), status (default "backlog"), label (default "Feature"), description (1-3 sentences of context)
 - CEO-level tasks (decisions, people to contact, documents to write, meetings, deadlines) → create_konban_task
 - When in doubt between Linear and Konban, prefer Linear for anything that involves code changes.
+
+ROUTING EXAMPLES (common mistakes):
+- "Fix attribution: Add identifiers to match_preview_cta_clicked" → Linear (code change)
+- "Implement insurance pre-filter in matching algorithm" → Linear (code change)
+- "Fix gender matching: Filter fix for null therapist gender" → Linear (code change)
+- "Pivot outreach messaging to cite concrete demand numbers" → Konban (CEO action: rewrite emails)
+- "Formal legal review of chatbot modality framing" → Konban (CEO action: get legal opinion)
+- "Fix attribution: Propagate card_cta_variant to downstream events" → Linear (code change)
 
 DONE_KONBAN_TASK rules:
 - Only propose done_konban_task when evidence is EXPLICIT: "shipped", "deployed", "committed", "sent", "done", or you see the actual tool call (konban done, git push) in the transcript.
@@ -377,7 +388,7 @@ def load_brain_index() -> str:
     """Load Brain doc index (all docs across sections)."""
     if not BRAIN_SCRIPT or not BRAIN_SCRIPT.exists():
         return "[Brain unavailable]"
-    output = run_cmd(["python3", str(BRAIN_SCRIPT), "index"], timeout=30)
+    output = run_cmd(["python3", str(BRAIN_SCRIPT), "index"], timeout=60)
     return output or "[Brain index unavailable]"
 
 
