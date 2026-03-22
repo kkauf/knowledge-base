@@ -24,6 +24,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
@@ -155,6 +156,149 @@ def check_permission(action: dict) -> tuple[bool, str]:
     return True, "ALLOWED"
 
 
+def _strip_daemon_decoration(title: str) -> str:
+    """Strip [daemon] tag and category prefixes to get the core task description.
+
+    Examples:
+        "[daemon] [Business/KH/Product] Fix attribution: Populate person_id"
+        → "Fix attribution: Populate person_id"
+
+        "[daemon] Fix tracking: Populate person_id on variant-tagged events"
+        → "Fix tracking: Populate person_id on variant-tagged events"
+    """
+    # Remove [daemon] tag
+    title = title.replace("[daemon]", "").strip()
+    # Remove category tags like [Business/KH/Product], [Personal/Health], etc.
+    title = re.sub(r'\[[^\]]*\]\s*', '', title).strip()
+    return title
+
+
+def _normalize_for_dedup(title: str) -> str:
+    """Normalize a task title for dedup comparison.
+
+    Strips daemon decoration AND the verb/category prefix before the colon,
+    so "Fix attribution: Populate person_id" and "Fix tracking: Populate person_id"
+    both normalize to "populate person_id".
+    """
+    core = _strip_daemon_decoration(title).lower()
+    # Strip the prefix before the first colon (e.g., "Fix attribution:", "Fix tracking:")
+    if ":" in core:
+        core = core.split(":", 1)[1].strip()
+    return core
+
+
+def _tokenize(text: str) -> set[str]:
+    """Split text into a set of lowercase words, stripping punctuation."""
+    return set(re.findall(r'[a-z0-9_-]+', text.lower()))
+
+
+def _word_overlap_score(a: str, b: str) -> float:
+    """Compute word-overlap similarity between two strings (Jaccard index)."""
+    words_a = _tokenize(a)
+    words_b = _tokenize(b)
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union)
+
+
+def _containment_score(short: str, long: str) -> float:
+    """What fraction of the shorter string's words appear in the longer string.
+
+    Catches cases where a human-created task ("Fix gender matching bug") is
+    a subset of a verbose daemon task ("Fix gender matching: Filter fix for null therapist gender").
+    """
+    words_short = _tokenize(short)
+    words_long = _tokenize(long)
+    if not words_short:
+        return 0.0
+    return len(words_short & words_long) / len(words_short)
+
+
+# Cache for dedup: loaded once per executor run
+_konban_all_cache: list[str] | None = None
+
+
+def _load_all_konban_titles() -> list[str]:
+    """Load ALL Konban task titles (including Done/Grave) for dedup."""
+    global _konban_all_cache
+    if _konban_all_cache is not None:
+        return _konban_all_cache
+
+    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
+        _konban_all_cache = []
+        return _konban_all_cache
+
+    exit_code, stdout, stderr = run_command(
+        ["python3", str(KONBAN_SCRIPT), "all"], timeout=60
+    )
+    titles = []
+    if exit_code == 0 and stdout:
+        for line in stdout.splitlines():
+            # Format: "Status | Priority | Timebox | Due | Title [page_id]"
+            parts = line.split(" | ")
+            if len(parts) >= 5:
+                # Last part is "Title [page_id]"
+                title_part = " | ".join(parts[4:])
+                # Strip the trailing [page_id]
+                title_clean = re.sub(r'\s*\[[0-9a-f-]+\]\s*$', '', title_part)
+                titles.append(title_clean)
+    _konban_all_cache = titles
+    return _konban_all_cache
+
+
+def _find_duplicate_task(new_title: str) -> str | None:
+    """Check if a similar task already exists in Konban (including Done/Grave).
+
+    Returns the matching existing task title if a duplicate is found, None otherwise.
+
+    Dedup strategy (layered, any match → duplicate):
+    1. Normalize both titles (strip daemon tags, category prefixes, verb prefix before colon)
+       → Exact match or high word-overlap (>= 0.7 Jaccard) → duplicate
+    2. Strip decoration only (keep colon prefix) and check containment
+       → If >= 75% of the shorter title's words appear in the longer → duplicate
+       (catches human-created Done tasks like "Fix gender matching bug" matching
+        daemon tasks like "[daemon] Fix gender matching: Filter fix for null therapist gender")
+    """
+    existing_titles = _load_all_konban_titles()
+    new_normalized = _normalize_for_dedup(new_title)
+    new_stripped = _strip_daemon_decoration(new_title).lower()
+
+    if not new_normalized:
+        return None
+
+    for existing in existing_titles:
+        existing_normalized = _normalize_for_dedup(existing)
+        existing_stripped = _strip_daemon_decoration(existing).lower()
+        if not existing_normalized:
+            continue
+
+        # Layer 1: Exact match on normalized core (colon prefix stripped)
+        if new_normalized == existing_normalized:
+            return existing
+
+        # Layer 2: High word overlap on normalized core
+        if _word_overlap_score(new_normalized, existing_normalized) >= 0.7:
+            return existing
+
+        # Layer 3: Containment check on stripped form (keeps colon prefix)
+        # The shorter title's words should mostly appear in the longer title.
+        # Catches already-shipped human tasks like "Fix gender matching bug"
+        # matching daemon tasks like "Fix gender matching: Filter fix for null therapist gender"
+        if existing_stripped and new_stripped:
+            short, long = (existing_stripped, new_stripped) if len(existing_stripped) <= len(new_stripped) else (new_stripped, existing_stripped)
+            short_words = _tokenize(short)
+            long_words = _tokenize(long)
+            # Require: short title has >= 3 words (avoid false positives on "Fix bug"),
+            # at least 3 content words overlap, and >= 60% of short's words are contained
+            overlap_count = len(short_words & long_words)
+            if len(short_words) >= 3 and overlap_count >= 3 and _containment_score(short, long) >= 0.6:
+                return existing
+
+    return None
+
+
 def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
     """Create a Konban task."""
     if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
@@ -176,6 +320,15 @@ def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
         return {"status": "skipped", "reason": f"Dev task routed away from Konban (domain={domain})",
                 "title": title}
 
+    # Dedup check: compare core title against ALL existing tasks (including Done/Grave)
+    # Strips daemon tags, category prefixes, and verb prefixes before colon for comparison
+    duplicate = _find_duplicate_task(title)
+    if duplicate:
+        log_audit(f"  DEDUP: Skipped '{title}' — similar task exists: '{duplicate}'")
+        return {"status": "skipped",
+                "reason": f"Duplicate detected: '{duplicate}'",
+                "title": title}
+
     priority = action.get("priority", "Medium")
     timebox = action.get("timebox")
 
@@ -189,6 +342,9 @@ def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
     exit_code, stdout, stderr = run_command(cmd)
 
     result = {"status": "success" if exit_code == 0 else "failed", "exit_code": exit_code}
+    if exit_code == 0 and _konban_all_cache is not None:
+        # Add to cache so subsequent creates in the same run also dedup against it
+        _konban_all_cache.append(title)
     if stdout:
         result["output"] = stdout
         # Extract page ID from "Created: <id>" output
