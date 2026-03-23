@@ -869,25 +869,33 @@ def main():
         action_plan = call_reconciliation_model(artifacts_json, system_state, args.model)
         _end(f"{len(action_plan.get('proposed_actions', []))} actions")
 
-    # Merge stale state findings — promote completed Konban tasks with git evidence
-    # to done_konban_task actions; route the rest as conflicts for review.
+    # Merge stale state findings — promote completed tasks/issues with git evidence
+    # to done actions; route the rest as conflicts for review.
     for item in stale_items:
         status = item.get("status", "completed")
         source = item.get("source", "")
         evidence = item.get("evidence", "")
         remaining = item.get("remaining")
+        has_git_evidence = evidence and ("commit" in evidence.lower() or "git" in evidence.lower())
 
         # Promote: fully completed Konban tasks with git commit evidence → done_konban_task
-        if (status == "completed"
-                and source == "konban"
-                and evidence
-                and ("commit" in evidence.lower() or "git" in evidence.lower())):
+        if status == "completed" and source == "konban" and has_git_evidence:
             action_plan.setdefault("proposed_actions", []).append({
                 "type": "done_konban_task",
                 "target": item.get("item", ""),
                 "content": f"State consistency check: {evidence}",
                 "confidence": "high",
                 "rationale": f"[state-check] Konban task completed per git evidence: {evidence}",
+                "source_artifact": "[state-check] consistency",
+            })
+        # Promote: fully completed Linear issues with git commit evidence → done_linear_issue
+        elif status == "completed" and source == "linear" and has_git_evidence:
+            action_plan.setdefault("proposed_actions", []).append({
+                "type": "done_linear_issue",
+                "target": item.get("item", ""),
+                "content": f"State consistency check: {evidence}",
+                "confidence": "high",
+                "rationale": f"[state-check] Linear issue completed per git evidence: {evidence}",
                 "source_artifact": "[state-check] consistency",
             })
         else:

@@ -53,6 +53,7 @@ ALLOWED_ACTIONS = {
     "create_brain_doc",     # Create new Brain doc under a section
     "enrich_brain_doc",     # Append new section to existing Brain doc (additive only)
     "done_konban_task",     # Mark task done (high-confidence only, Tier 1)
+    "done_linear_issue",    # Mark Linear issue done (high-confidence only, Tier 1)
     "fix_skill",            # Propose skill fix (write to review file, don't apply)
     "no_action",            # Explicit no-op (for audit trail)
 }
@@ -69,6 +70,7 @@ DENIED_ACTIONS = {
 # Medium confidence → proposed at standup. Low confidence → skipped.
 HIGH_CONFIDENCE_REQUIRED = {
     "done_konban_task",
+    "done_linear_issue",
 }
 
 
@@ -152,6 +154,13 @@ def check_permission(action: dict) -> tuple[bool, str]:
         confidence = action.get("confidence", "low")
         if confidence != "high":
             return False, f"DEFERRED: done_konban_task requires high confidence (got {confidence})"
+
+    if action_type == "done_linear_issue":
+        if not action.get("identifier") and not action.get("target"):
+            return False, "DENIED: done_linear_issue requires identifier (e.g., EARTH-379) or target"
+        confidence = action.get("confidence", "low")
+        if confidence != "high":
+            return False, f"DEFERRED: done_linear_issue requires high confidence (got {confidence})"
 
     return True, "ALLOWED"
 
@@ -519,6 +528,45 @@ def execute_done_konban_task(action: dict, dry_run: bool) -> dict:
 
     exit_code, stdout, stderr = run_command(cmd)
     result = {"status": "success" if exit_code == 0 else "failed", "exit_code": exit_code}
+    if stdout:
+        result["output"] = stdout
+    if stderr:
+        result["error"] = stderr
+    return result
+
+
+def execute_done_linear_issue(action: dict, dry_run: bool) -> dict:
+    """Mark a Linear issue as done. Only executes with high confidence."""
+    linear_script = get_skills_dir() / "linear" / "linear-api.py"
+    if not linear_script.exists():
+        return {"status": "failed", "reason": f"Linear script not available at {linear_script}"}
+
+    identifier = action.get("identifier", "")
+    target = action.get("target", "")
+    evidence = action.get("content", "")
+    source = action.get("source_artifact", "unknown")
+
+    # Extract EARTH-XXX identifier from target if not provided directly
+    if not identifier and target:
+        m = re.search(r'(EARTH-\d+)', target)
+        if m:
+            identifier = m.group(1)
+
+    if not identifier:
+        return {"status": "failed", "reason": "No Linear identifier found in action"}
+
+    # Add comment with evidence before closing
+    comment = f"[daemon] Marked done — {evidence}\nSource: {source}"
+    if not dry_run:
+        run_command(["python3", str(linear_script), "comment", identifier, comment])
+
+    cmd = ["python3", str(linear_script), "update", identifier, "--status", "done"]
+    if dry_run:
+        return {"status": "dry_run", "command": " ".join(cmd)}
+
+    exit_code, stdout, stderr = run_command(cmd)
+    result = {"status": "success" if exit_code == 0 else "failed", "exit_code": exit_code,
+              "identifier": identifier}
     if stdout:
         result["output"] = stdout
     if stderr:
@@ -926,6 +974,7 @@ EXECUTORS = {
     "log_konban_task": execute_log_konban_task,
     "update_konban_task": execute_update_konban_task,
     "done_konban_task": execute_done_konban_task,
+    "done_linear_issue": execute_done_linear_issue,
     "create_brain_doc": execute_create_brain_doc,
     "enrich_brain_doc": execute_enrich_brain_doc,
     "fix_skill": execute_fix_skill,
@@ -1187,6 +1236,7 @@ def generate_review(report: dict = None) -> str:
     enriched = [r for r in results if r.get("action") == "enrich_brain_doc" and r.get("status") == "success"]
     logged = [r for r in results if r.get("action") == "log_konban_task" and r.get("status") == "success"]
     done_tasks = [r for r in results if r.get("action") == "done_konban_task" and r.get("status") == "success"]
+    done_issues = [r for r in results if r.get("action") == "done_linear_issue" and r.get("status") == "success"]
     updated_tasks = [r for r in results if r.get("action") == "update_konban_task" and r.get("status") == "success"]
     skill_fixes = [r for r in results if r.get("action") == "fix_skill" and r.get("status") == "success"]
     no_actions = [r for r in results if r.get("status") == "no_action"]
@@ -1205,6 +1255,8 @@ def generate_review(report: dict = None) -> str:
         parts.append(f"{len(logged)} task logs added")
     if done_tasks:
         parts.append(f"{len(done_tasks)} tasks marked done")
+    if done_issues:
+        parts.append(f"{len(done_issues)} Linear issues closed")
     if updated_tasks:
         parts.append(f"{len(updated_tasks)} tasks updated")
     if skill_fixes:
@@ -1253,6 +1305,15 @@ def generate_review(report: dict = None) -> str:
         lines.append("**Tasks marked done**:")
         for r in done_tasks:
             lines.append(f"  [✓] {r.get('target', '?')}")
+        lines.append("")
+
+    # DONE: Linear issues closed
+    if done_issues:
+        lines.append("**Linear issues closed**:")
+        for r in done_issues:
+            identifier = r.get("identifier", "")
+            target = r.get("target", "?")
+            lines.append(f"  [✓] {identifier} {target}")
         lines.append("")
 
     # DONE: Tasks updated
