@@ -486,20 +486,24 @@ def execute_done_konban_task(action: dict, dry_run: bool) -> dict:
 
     # Resolve task_id from target name if needed
     if not task_id and target:
-        if dry_run:
-            return {"status": "dry_run", "note": f"Would search for '{target}' then mark done"}
+        # Try to extract page ID directly from target string (e.g., "Task name [uuid]")
+        id_in_target = re.findall(r'\[([0-9a-f-]{36})\]', target)
+        if id_in_target:
+            task_id = id_in_target[0]
+        else:
+            if dry_run:
+                return {"status": "dry_run", "note": f"Would search for '{target}' then mark done"}
 
-        import re
-        search_code, search_out, _ = run_command(
-            ["python3", str(KONBAN_SCRIPT), "search", target]
-        )
-        if search_code != 0 or "No active tasks" in search_out:
-            return {"status": "skipped", "reason": f"Task not found: {target}"}
+            search_code, search_out, _ = run_command(
+                ["python3", str(KONBAN_SCRIPT), "search", target]
+            )
+            if search_code != 0 or "No active tasks" in search_out:
+                return {"status": "skipped", "reason": f"Task not found: {target}"}
 
-        id_matches = re.findall(r'\[([0-9a-f-]{36})\]', search_out)
-        if not id_matches:
-            return {"status": "skipped", "reason": f"No matching task for: {target}"}
-        task_id = id_matches[0]
+            id_matches = re.findall(r'\[([0-9a-f-]{36})\]', search_out)
+            if not id_matches:
+                return {"status": "skipped", "reason": f"No matching task for: {target}"}
+            task_id = id_matches[0]
 
     if not task_id:
         return {"status": "failed", "reason": "No task_id or target provided"}

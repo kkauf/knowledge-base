@@ -784,7 +784,11 @@ def main():
         actionable = [a for a in artifacts
                       if (a.get("persistence_status") != "persisted"
                           and a.get("value", "low") in ("very_high", "medium"))
-                      or a.get("type") == "error_pattern"]
+                      or a.get("type") == "error_pattern"
+                      # Completion signals bypass persistence filter — the code is
+                      # persisted, but the task tracker still needs updating
+                      or (a.get("type") == "commitment_update"
+                          and a.get("update_type") == "completion")]
         has_artifacts = len(actionable) > 0
 
     # Load system state (includes SKILL.md docs when error_patterns are pending)
@@ -865,19 +869,37 @@ def main():
         action_plan = call_reconciliation_model(artifacts_json, system_state, args.model)
         _end(f"{len(action_plan.get('proposed_actions', []))} actions")
 
-    # Merge stale state findings as conflicts
+    # Merge stale state findings — promote completed Konban tasks with git evidence
+    # to done_konban_task actions; route the rest as conflicts for review.
     for item in stale_items:
         status = item.get("status", "completed")
+        source = item.get("source", "")
+        evidence = item.get("evidence", "")
         remaining = item.get("remaining")
-        detail = f"[{status}] {item.get('evidence', '')}"
-        if remaining:
-            detail += f" | Remaining: {remaining}"
-        detail += f" — {item.get('recommendation', 'Review needed')}"
-        action_plan.setdefault("conflicts_flagged", []).append({
-            "artifact": f"[state-check] {item.get('source', '?')}",
-            "conflicts_with": item.get("item", "?"),
-            "recommendation": detail,
-        })
+
+        # Promote: fully completed Konban tasks with git commit evidence → done_konban_task
+        if (status == "completed"
+                and source == "konban"
+                and evidence
+                and ("commit" in evidence.lower() or "git" in evidence.lower())):
+            action_plan.setdefault("proposed_actions", []).append({
+                "type": "done_konban_task",
+                "target": item.get("item", ""),
+                "content": f"State consistency check: {evidence}",
+                "confidence": "high",
+                "rationale": f"[state-check] Konban task completed per git evidence: {evidence}",
+                "source_artifact": "[state-check] consistency",
+            })
+        else:
+            detail = f"[{status}] {evidence}"
+            if remaining:
+                detail += f" | Remaining: {remaining}"
+            detail += f" — {item.get('recommendation', 'Review needed')}"
+            action_plan.setdefault("conflicts_flagged", []).append({
+                "artifact": f"[state-check] {source}",
+                "conflicts_with": item.get("item", "?"),
+                "recommendation": detail,
+            })
 
     # Display results
     actions = action_plan.get("proposed_actions", [])

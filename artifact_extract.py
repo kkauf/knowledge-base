@@ -290,8 +290,9 @@ def _detect_persistence_signals(session_path: str) -> list[str]:
     """Detect what was written to external systems during a session.
 
     Parses tool_use blocks for Brain/Notion writes, file edits (MEMORY.md, docs/,
-    SKILL.md), git commits, and Konban/Linear task creation. Returns human-readable
-    list of what's already persisted, so the session_memory can focus on gaps.
+    SKILL.md), git commits, git pushes, and Konban/Linear task completion.
+    Returns human-readable list of what's already persisted, so the session_memory
+    can focus on gaps.
     """
     signals = []
     try:
@@ -329,16 +330,139 @@ def _detect_persistence_signals(session_path: str) -> list[str]:
                                 signals.append(f"File write: {bname}")
                             elif ext not in code_exts and bname not in ("package.json", "tsconfig.json"):
                                 signals.append(f"File write: {bname}")
-                        # Git commits
+                        # Git commits, git pushes, Konban/task completions
                         elif name == "Bash":
                             cmd = inp.get("command", "")
                             if "git commit" in cmd:
                                 signals.append("Git commit")
+                            if "git push" in cmd:
+                                signals.append("Git push")
+                            if "konban" in cmd and "done" in cmd:
+                                signals.append("Konban done")
+                            if "notion-api.py" in cmd and "done" in cmd:
+                                signals.append("Konban done")
                 except json.JSONDecodeError:
                     continue
     except OSError:
         pass
     return list(dict.fromkeys(signals))  # dedupe preserving order
+
+
+def _detect_completion_signals(session_path: str) -> list[dict]:
+    """Detect deterministic completion signals from tool_use blocks.
+
+    Scans for:
+    - git push after git commit → code was shipped
+    - konban done / notion-api.py done → task explicitly completed
+
+    Returns synthetic commitment_update artifacts ready to be appended
+    to the extraction output.
+    """
+    import re
+
+    artifacts = []
+    # Collect all Bash commands in order to detect sequences
+    bash_commands = []
+    try:
+        with open(session_path) as f:
+            for line in f:
+                try:
+                    msg = json.loads(line)
+                    if msg.get("type") != "assistant":
+                        continue
+                    content = msg.get("message", {}).get("content", "")
+                    if not isinstance(content, list):
+                        continue
+                    for block in content:
+                        if not isinstance(block, dict) or block.get("type") != "tool_use":
+                            continue
+                        if block.get("name") == "Bash":
+                            cmd = block.get("input", {}).get("command", "")
+                            if cmd:
+                                bash_commands.append(cmd)
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return []
+
+    # Detect git push after git commit — extract commit message from the commit command
+    last_commit_msg = None
+    for cmd in bash_commands:
+        if "git commit" in cmd:
+            # Extract commit message from -m flag
+            # Try heredoc pattern FIRST (most common in Claude Code sessions)
+            # JSONL encodes newlines as literal \n, so match both real and escaped
+            m_heredoc = re.search(
+                r"git commit\s+.*?-m\s+\"\$\(cat\s+<<'?EOF'?"
+                r"(?:\\n|\n)"       # newline after <<'EOF'
+                r"(.+?)"           # capture the message
+                r"(?:\\n|\n)EOF",   # EOF terminator
+                cmd, re.DOTALL
+            )
+            if m_heredoc:
+                msg = m_heredoc.group(1).strip()
+                # Split on escaped or real newlines, take first line
+                first_line = re.split(r'\\n|\n', msg)[0].strip()
+                last_commit_msg = first_line if first_line else msg
+            else:
+                # Simple: git commit -m "msg" or git commit -m 'msg'
+                m = re.search(r'git commit\s+.*?-m\s+["\'](.+?)["\']', cmd, re.DOTALL)
+                if m:
+                    last_commit_msg = m.group(1).strip()
+                    first_line = last_commit_msg.split("\n")[0].strip()
+                    if first_line:
+                        last_commit_msg = first_line
+                else:
+                    last_commit_msg = "(commit message not parsed)"
+        elif "git push" in cmd and last_commit_msg:
+            artifacts.append({
+                "type": "commitment_update",
+                "title": f"Code shipped: {last_commit_msg[:80]}",
+                "update_type": "completion",
+                "commitment_target": last_commit_msg,
+                "value": "very_high",
+                "persistence_status": "persisted",
+                "persistence_evidence": f"git push after git commit: {last_commit_msg}",
+                "content": f"Code was committed and pushed. Commit message: {last_commit_msg}",
+                "summary": f"Git push detected after commit: {last_commit_msg[:60]}",
+                "category": "Infrastructure",
+                "sub_category": "Code Delivery",
+                "key_terms": ["git", "push", "commit", "shipped"],
+                "confidence": "high",
+            })
+            last_commit_msg = None  # Reset after matching
+
+    # Detect konban done / notion-api.py done
+    for cmd in bash_commands:
+        task_title = None
+        if "konban" in cmd and "done" in cmd:
+            # konban done <task_id> or konban done "<title>"
+            m = re.search(r'konban\s+done\s+["\']?(.+?)["\']?\s*$', cmd)
+            if m:
+                task_title = m.group(1).strip()
+        elif "notion-api.py" in cmd and "done" in cmd:
+            # notion-api.py done <task_id>
+            m = re.search(r'notion-api\.py\s+done\s+["\']?(.+?)["\']?\s*$', cmd)
+            if m:
+                task_title = m.group(1).strip()
+        if task_title:
+            artifacts.append({
+                "type": "commitment_update",
+                "title": f"Task completed: {task_title[:80]}",
+                "update_type": "completion",
+                "commitment_target": task_title,
+                "value": "very_high",
+                "persistence_status": "persisted",
+                "persistence_evidence": f"Explicit task completion via: {cmd.strip()[:120]}",
+                "content": f"Task was explicitly marked done. Command: {cmd.strip()[:200]}",
+                "summary": f"Task explicitly completed: {task_title[:60]}",
+                "category": "Infrastructure",
+                "sub_category": "Task Management",
+                "key_terms": ["konban", "done", "task", "completed"],
+                "confidence": "high",
+            })
+
+    return artifacts
 
 
 # --- Model call ---
@@ -554,10 +678,12 @@ def main():
         total = len(all_messages)
 
         if last_offset < 0:
-            # First time — process last 50 messages
-            start = max(0, total - 50)
+            # First time seeing this session — process ALL messages (not just last 50).
+            # The full session is valuable context; the extraction LLM truncation
+            # handles overly long transcripts, and the context frame gives it
+            # awareness of what to look for.
             context_msgs = []
-            new_msgs = all_messages[start:]
+            new_msgs = all_messages
         else:
             new_start = last_offset + 1
             if new_start >= total:
@@ -642,6 +768,11 @@ def main():
     if persistence_signals:
         print(f"Persistence signals: {len(persistence_signals)} ({', '.join(persistence_signals[:3])}{'...' if len(persistence_signals) > 3 else ''})")
 
+    # Detect deterministic completion signals (git push, konban done) for synthetic artifacts
+    completion_artifacts = _detect_completion_signals(session_path)
+    if completion_artifacts:
+        print(f"Completion signals: {len(completion_artifacts)} synthetic artifact(s)")
+
     print(f"Extracting artifacts from {len(transcript)} chars...")
     print(f"Model: {args.model} | Domain: {domain or 'unknown'}")
     print()
@@ -664,6 +795,11 @@ def main():
                  and a["title"].strip() not in ("?", "??", "...", "N/A", "n/a", "Untitled")]
     if len(artifacts) < pre_filter:
         print(f"Filtered {pre_filter - len(artifacts)} artifact(s) with garbage titles")
+
+    # Merge deterministic completion artifacts (from tool_use parsing, not LLM)
+    if completion_artifacts:
+        artifacts.extend(completion_artifacts)
+        print(f"Added {len(completion_artifacts)} synthetic completion artifact(s)")
 
     print(f"Found: {len(artifacts)} artifact(s), {len(errors)} error pattern(s)")
     if summary:
