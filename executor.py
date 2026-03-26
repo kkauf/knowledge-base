@@ -34,7 +34,7 @@ from pathlib import Path
 
 from config import (get_kb_dir, get_audit_log, get_review_file, get_konban_script,
                     get_brain_script, get_skills_dir, get_skill_fixes_file,
-                    get_proposals_file)
+                    get_proposals_file, get_linear_script)
 
 KB_DIR = get_kb_dir()
 AUDIT_LOG = get_audit_log()
@@ -42,6 +42,7 @@ REVIEW_FILE = get_review_file()
 
 KONBAN_SCRIPT = get_konban_script()
 BRAIN_SCRIPT = get_brain_script()
+LINEAR_SCRIPT = get_linear_script()
 
 # --- Permission Model ---
 
@@ -308,6 +309,76 @@ def _find_duplicate_task(new_title: str) -> str | None:
     return None
 
 
+# Cache for Linear dedup: loaded once per executor run
+_linear_all_cache: list[str] | None = None
+
+
+def _load_all_linear_titles() -> list[str]:
+    """Load ALL Linear issue titles (all statuses incl. Done/Canceled) for dedup."""
+    global _linear_all_cache
+    if _linear_all_cache is not None:
+        return _linear_all_cache
+
+    if not LINEAR_SCRIPT or not LINEAR_SCRIPT.exists():
+        _linear_all_cache = []
+        return _linear_all_cache
+
+    exit_code, stdout, stderr = run_command(
+        ["python3", str(LINEAR_SCRIPT), "board", "--all"], timeout=30
+    )
+    titles = []
+    if exit_code == 0 and stdout:
+        for line in stdout.splitlines():
+            # Format: "EARTH-XXX  | Status | Priority | [Label] Title"
+            parts = line.split(" | ")
+            if len(parts) >= 4:
+                # Last part is "[Label] Title" — strip the label tag
+                title_part = " | ".join(parts[3:])
+                title_clean = re.sub(r'^\[[^\]]*\]\s*', '', title_part).strip()
+                titles.append(title_clean)
+    _linear_all_cache = titles
+    return _linear_all_cache
+
+
+def _find_duplicate_linear_issue(new_title: str) -> str | None:
+    """Check if a similar issue already exists in Linear.
+
+    Uses the same 3-layer matching strategy as Konban dedup:
+    1. Exact match on normalized core (colon prefix stripped)
+    2. High word overlap (Jaccard >= 0.7)
+    3. Containment (>= 60% of shorter title's words in longer)
+    """
+    existing_titles = _load_all_linear_titles()
+    new_normalized = _normalize_for_dedup(new_title)
+    new_stripped = _strip_daemon_decoration(new_title).lower()
+
+    if not new_normalized:
+        return None
+
+    for existing in existing_titles:
+        existing_normalized = _normalize_for_dedup(existing)
+        existing_stripped = _strip_daemon_decoration(existing).lower()
+        if not existing_normalized:
+            continue
+
+        # Layer 1: Exact match on normalized core
+        if new_normalized == existing_normalized:
+            return existing
+
+        # Layer 2: High word overlap on normalized core
+        if _word_overlap_score(new_normalized, existing_normalized) >= 0.7:
+            return existing
+
+        # Layer 3: Containment check
+        if existing_stripped and new_stripped:
+            short, long = (existing_stripped, new_stripped) if len(existing_stripped) <= len(new_stripped) else (new_stripped, existing_stripped)
+            short_words = _tokenize(short)
+            if len(short_words) >= 3 and len(short_words & _tokenize(long)) >= 3 and _containment_score(short, long) >= 0.6:
+                return existing
+
+    return None
+
+
 def execute_create_konban_task(action: dict, dry_run: bool) -> dict:
     """Create a Konban task."""
     if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
@@ -389,6 +460,22 @@ def execute_create_linear_issue(action: dict, dry_run: bool) -> dict:
     # Tag all daemon-created issues
     if "[daemon]" not in title:
         title = f"[daemon] {title}"
+
+    # Dedup check: compare against existing Linear issues (all statuses)
+    duplicate = _find_duplicate_linear_issue(title)
+    if duplicate:
+        log_audit(f"  DEDUP: Skipped Linear issue '{title}' — similar issue exists: '{duplicate}'")
+        return {"status": "skipped",
+                "reason": f"Duplicate of existing Linear issue: {duplicate}",
+                "title": title}
+
+    # Also check Konban (cross-system dedup: catches tasks that were done in Konban but not Linear)
+    konban_dup = _find_duplicate_task(title)
+    if konban_dup:
+        log_audit(f"  DEDUP: Skipped Linear issue '{title}' — similar Konban task exists: '{konban_dup}'")
+        return {"status": "skipped",
+                "reason": f"Duplicate of existing Konban task: {konban_dup}",
+                "title": title}
 
     # Map priority: string → int (Linear uses 0-4)
     priority_raw = action.get("priority", "3")  # Default Medium

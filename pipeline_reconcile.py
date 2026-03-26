@@ -366,20 +366,27 @@ GIT_REPOS = get_git_repos()
 
 
 def load_git_history(days: int = 7) -> str:
-    """Load recent git commit history across tracked repos."""
+    """Load recent git commit history across tracked repos.
+
+    Uses --stat to include changed filenames, so the reconciliation LLM can
+    detect staleness from migration files, renamed functions, etc. — not just
+    commit message keywords.
+    """
     sections = []
     for repo in GIT_REPOS:
         if not (repo / ".git").exists():
             continue
+        # Compact stat: commit message + changed files on one line each
         output = run_cmd(
-            ["git", "-C", str(repo), "log", "--all", "--oneline", f"--since={days} days ago",
-             "--no-merges", "--decorate=short", "--format=%h %d %s (%ar)"],
+            ["git", "-C", str(repo), "log", "--all", f"--since={days} days ago",
+             "--no-merges", "--decorate=short",
+             "--format=%h %d %s (%ar)", "--stat", "--stat-width=80"],
             timeout=15,
         )
         if output:
             lines = output.split("\n")
-            if len(lines) > 30:
-                output = "\n".join(lines[:30]) + f"\n... ({len(lines) - 30} more)"
+            if len(lines) > 80:
+                output = "\n".join(lines[:80]) + f"\n... ({len(lines) - 80} more lines)"
             sections.append(f"### {repo.name}\n{output}")
     return "\n\n".join(sections) if sections else "[No recent commits]"
 
