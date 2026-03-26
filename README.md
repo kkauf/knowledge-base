@@ -1,6 +1,10 @@
 # knowledge-base
 
-Persistent memory for Claude Code. Extracts facts from your sessions, stores them in SQLite, and injects them back automatically — so Claude remembers what happened last week, last month, or six months ago.
+Persistent memory for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). A background daemon extracts structured knowledge from your session transcripts into SQLite and injects it back automatically via Claude Code hooks — so Claude remembers what happened last week, last month, or six months ago.
+
+**No vector database. No cloud service. No RAG pipeline.** Just SQLite, regex matching, and the hooks system that Claude Code already ships with.
+
+Currently running in production: **1,250 entities, 8,000 facts, 2,400 decisions** extracted from months of daily Claude Code use across business operations, software development, and consulting.
 
 ## The Problem
 
@@ -15,39 +19,84 @@ You can put some of this in `CLAUDE.md` or `MEMORY.md`, but those are manual, un
 
 **The result: you re-explain context constantly.** Every session starts with "remember, we decided X" and "by the way, Y changed." You become a human context loader for your own AI assistant.
 
-## What This Does
+## The Key Insight: Hooks as the Integration Layer
 
-This tool runs a background daemon that reads your Claude Code session transcripts, extracts structured knowledge, and makes it available to every future session — automatically.
+The hardest part of agent memory isn't storage or extraction — it's **getting the agent to actually use it**. You can build the most sophisticated knowledge graph in the world, but if the agent has to be told "check the knowledge base" every time, you've just moved the problem.
+
+Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code/hooks) solves this. Hooks are shell commands that execute automatically in response to session events — before a tool runs, after a message is sent, when the user submits a prompt. They're deterministic (not LLM-decided) and fast (millisecond-scale).
+
+This project uses hooks to create a **closed memory loop**:
+
+```
+ You type a message
+       │
+       ▼
+ ┌──────────────────────────┐
+ │  UserPromptSubmit Hook   │  ~10-50ms
+ │  (kb-recall.py)          │  Regex-matches entity names in your message
+ │                          │  against the entity index. Injects matching
+ │                          │  facts as system-reminder context.
+ └──────────┬───────────────┘
+            ▼
+ Claude sees your message + relevant facts
+ from every previous session. Responds.
+            │
+            ▼
+ Session transcript saved (JSONL)
+            │
+            ▼
+ ┌──────────────────────────┐
+ │  Extraction Daemon       │  Every 30 min (launchd)
+ │  (extract.py)            │  Reads new transcript messages,
+ │                          │  extracts entities/facts/decisions
+ └──────────┬───────────────┘
+            ▼
+ SQLite DB + entity index updated
+            │
+            ▼
+ Next session's hook has the new facts
+```
+
+**The hook is what makes this zero-effort.** Without it, you'd need to tell Claude "check the KB" for every relevant entity — which defeats the purpose. With it, recall is automatic and invisible. You just talk normally, and Claude already knows the context.
+
+### Why hooks instead of a bigger context window?
+
+- A 200K context window costs tokens on **every message** (Claude Code sends the full conversation each turn). A hook adds ~200 tokens of targeted facts only when relevant entities are mentioned.
+- Context windows are static. The hook is dynamic — it responds to what you're actually talking about.
+- CLAUDE.md instructions tell Claude the KB exists and how to query it for deep lookups. But the hook handles 90% of cases automatically, before Claude even starts reasoning.
+
+## What This Does
 
 ### 1. It builds a knowledge graph from your sessions
 
-Every 30 minutes, a daemon reads your session transcripts and extracts:
+Every 30 minutes, a background daemon reads your Claude Code session transcripts and extracts:
 
-- **Entities**: people, projects, companies, tools, features
+- **Entities**: people, projects, companies, tools, features, concepts
 - **Facts**: attributes with values (`role: "engineering lead"`, `status: "on parental leave"`)
 - **Relations**: who works where, what depends on what, who owns what
 - **Decisions**: choices made and their rationale
 
-These go into a local SQLite database. Extraction is incremental — it picks up where it left off, never reprocesses old content, and handles sessions of any length.
+These go into a local SQLite database. Extraction is incremental — it tracks a per-session offset, picks up only new messages, and handles sessions of any length.
 
 ### 2. It injects knowledge into every session automatically
 
 Two mechanisms, zero manual effort:
 
-**BRIEF.md** — A auto-generated summary loaded into Claude's context at session start. Shows your domains, key entities, recent decisions, and top facts. ~500 tokens. Gives Claude a "lay of the land" before you say anything.
+**BRIEF.md** — An auto-generated summary loaded into Claude's context at session start via `CLAUDE.md`. Shows your domains, key entities, recent decisions, and top facts. ~500 tokens. Gives Claude a "lay of the land" before you say anything.
 
 ```
-# Knowledge Brief (847 entities, 2,391 facts)
+# Knowledge Brief (1,250 entities, 7,979 facts)
 
 ## Domains
-| Region   | Entities | Facts | Last updated          |
-|----------|----------|-------|-----------------------|
-| MyApp    | 523      | 1,641 | Stripe (2026-02-23)   |
-| Personal | 180      | 498   | schedule (2026-02-22) |
+| Domain         | Entities | Facts | Last updated            |
+|----------------|----------|-------|-------------------------|
+| MyApp          | 523      | 3,641 | Stripe (2026-03-25)     |
+| Consulting     | 280      | 1,498 | Acme Corp (2026-03-24)  |
+| Personal       | 180      | 698   | schedule (2026-03-22)   |
 
 ## Recent Decisions (7d)
-- **Switched from Redis to SQLite for session store** (2026-02-22) — Latency benchmarks showed...
-- **Moved to biweekly deploys** (2026-02-20) — Too many hotfixes from weekly cadence...
+- **Switched from Redis to SQLite for session store** (2026-03-22) — Latency benchmarks showed...
+- **Moved to biweekly deploys** (2026-03-20) — Too many hotfixes from weekly cadence...
 
 ## MyApp
 - **Acme Corp** (company, 84f): plan=enterprise | mrr=$4,200 | main_contact=Dana Chen
@@ -55,7 +104,25 @@ Two mechanisms, zero manual effort:
 - **Dana Chen** (person, 31f): role=VP Engineering | timezone=PST | prefers=async_updates
 ```
 
-**Recall Hook** — A `UserPromptSubmit` hook (~10-50ms) that pattern-matches entity names in your messages and injects their facts as `system-reminder` context. When you type "what's the status with Dana?", Claude already knows Dana is VP Engineering at Acme Corp before it even starts thinking.
+**Recall Hook** — A `UserPromptSubmit` hook (~10-50ms) that regex-matches entity names in your messages against `entity-index.json` and injects their facts as `system-reminder` context. When you type "what's the status with Dana?", Claude already has Dana's full profile before it starts thinking.
+
+```
+User: "What's the status with Dana and the Auth Service migration?"
+                     │
+   ┌─────────────────┘
+   ▼
+Hook matches: "Dana" → Dana Chen (person), "Auth Service" → Auth Service (project)
+   │
+   ▼
+Injects as system-reminder:
+  Dana Chen (person): role=VP Engineering | timezone=PST | prefers=async_updates
+  Auth Service (project): stack=Go | status=migrating_to_v2 | deadline=March 15 | owner=Dana Chen
+   │
+   ▼
+Claude sees the facts alongside the user's message. No "let me check the KB" step.
+```
+
+The index includes aliases and word-level variants (currently 1,959 entries from 1,250 entities) so informal references like first names or abbreviations still match.
 
 ### 3. It detects when things are stale or done
 
@@ -75,13 +142,26 @@ Actions are tiered by confidence:
 
 Nothing irreversible happens without your approval.
 
+## How It Maps to Memory Theory
+
+The industry is converging on four memory types for AI agents (see [Oracle's agent memory framework](https://blogs.oracle.com/developers/agent-memory-why-your-ai-has-amnesia-and-how-to-fix-it)). This project implements all four with local-first tooling:
+
+| Memory Type | Theory | Implementation |
+|-------------|--------|---------------|
+| **Working memory** | Active context for current task | BRIEF.md + recall hook injection (~500 tokens, refreshed per-message) |
+| **Semantic memory** | Facts and concepts | SQLite: entities, facts, relations (8,000+ facts, temporal validity) |
+| **Episodic memory** | Historical interactions | Session transcripts → extraction daemon → structured facts with timestamps |
+| **Procedural memory** | Learned skills and patterns | CLAUDE.md instructions + skill self-improvement pipeline (auto-patches tool docs) |
+
+The difference: enterprise solutions propose vector databases, graph stores, and cloud services. This runs on SQLite and shell scripts.
+
 ## Who This Is For
 
 - **Claude Code power users** who work across multiple projects and domains
 - **Solo operators / small teams** where one person carries all the context
 - **Anyone tired of re-explaining context** at the start of every session
 
-You need: macOS (for the launchd daemon), Python 3.10+, and an [OpenRouter](https://openrouter.ai/) API key (~$0.50/day for active use).
+You need: macOS (for the launchd daemon), Python 3.10+, and an [OpenRouter](https://openrouter.ai/) API key (~$0.30-0.50/day for active use).
 
 ## Quick Start
 
@@ -161,14 +241,16 @@ Add to your `~/.claude/settings.json`:
     "UserPromptSubmit": [
       {
         "command": "python3 ~/.knowledge-base/kb-recall.py \"$PROMPT\"",
-        "timeout": 100
+        "timeout": 2000
       }
     ]
   }
 }
 ```
 
-The recall hook script (`kb-recall.py`) is not included in this repo — it's a thin wrapper that matches entity names against `entity-index.json` and returns `system-reminder` blocks. See [ADR-001](docs/ADR-001-architecture.md) for the design. A reference implementation is straightforward: ~80 lines of Python doing regex matching + SQLite lookups.
+The recall hook runs on every user message. It regex-matches entity names from `entity-index.json` against your input and injects matching facts as `system-reminder` context. No LLM call — pure string matching + SQLite lookup. The 2-second timeout is generous; typical latency is 10-50ms.
+
+The recall hook script (`kb-recall.py`) is not included in this repo — it's a thin wrapper around the entity index. See [ADR-005](docs/ADR-005-recall-app-layer.md) for the design. A reference implementation is ~80 lines of Python: load `entity-index.json`, regex-match against the prompt, query SQLite for matching entity facts, output as `system-reminder` text.
 
 ### 6. Point Claude at your BRIEF.md
 
@@ -178,6 +260,7 @@ Add to your `~/.claude/CLAUDE.md` (or project-level):
 ## Knowledge Base
 - Auto-generated brief: `~/.knowledge-base/BRIEF.md` (loaded at session start)
 - Deep lookup: `python3 ~/.knowledge-base/kb.py query "entity"` | `search "term"` | `decisions`
+- Corrections: `kb.py correct "Entity" attribute "value"` | `kb.py delete-fact "Entity" attribute`
 ```
 
 That's it. The daemon extracts knowledge in the background. BRIEF.md refreshes automatically. The recall hook injects entity facts in real time. Claude just... remembers.
@@ -245,8 +328,9 @@ briefing.py                        # Regenerate BRIEF.md
           │
      ┌────┴────┐
      ▼         ▼
- BRIEF.md   entity-index.json
- (summary)  (for recall hook)
+ BRIEF.md   entity-index.json ──► recall hook
+ (summary)  (1,959 entries        (UserPromptSubmit)
+             w/ aliases)
 ```
 
 **Extraction** is passive and incremental. The daemon tracks a per-session offset (how many messages it's already processed). Each run picks up only new messages. A context overlap of 10 messages ensures continuity across extraction windows.
@@ -255,7 +339,23 @@ briefing.py                        # Regenerate BRIEF.md
 
 **Reconciliation** is on-demand. It loads pending artifacts plus your current system state (git commits, task board, documents) and decides what actions to take. High-confidence reversible actions execute automatically. Everything else gets proposed for your review.
 
-**The recall hook** runs on every user message (~10-50ms). It regex-matches entity names from `entity-index.json` against your input and injects matching facts as `system-reminder` context. No LLM call — pure string matching + SQLite lookup.
+**The recall hook** runs on every user message (~10-50ms). It regex-matches entity names from `entity-index.json` against your input and injects matching facts as `system-reminder` context. No LLM call — pure string matching + SQLite lookup. The index includes word-level aliases and name variants for fuzzy matching.
+
+**Session pre-filtering** reduces extraction cost by ~51%. A deterministic pre-filter classifies which session segments contain extractable knowledge vs. pure code/debugging, skipping segments that won't produce facts.
+
+## Why Not Vector Search / RAG?
+
+The obvious question. Vector embeddings are great for "find documents similar to this query." They're wrong for this use case because:
+
+1. **Entity recall needs precision, not similarity.** When you say "Dana," you need Dana Chen's exact facts — not documents that are semantically close to "Dana." Regex matching on a name index is faster, cheaper, and more predictable than embedding lookups.
+
+2. **Facts are structured, not prose.** The knowledge base stores `role: "VP Engineering"`, not paragraphs about Dana. Structured facts are directly usable. Embedded document chunks need interpretation.
+
+3. **Temporal validity matters.** Facts have `valid_from` / `valid_to` timestamps. "Dana was IC until January, then promoted to VP" is two facts with different validity windows. Vector similarity doesn't capture time.
+
+4. **Zero infrastructure.** SQLite + regex. No embedding model, no vector index to maintain, no similarity threshold to tune.
+
+The tradeoff: you lose fuzzy semantic matching. If you call something by an unfamiliar name, the hook won't match it. The mitigation is alias generation — the extraction pipeline captures alternative names and abbreviations as index entries.
 
 ## Configuration
 
@@ -296,16 +396,18 @@ A Notion-based reference implementation is available: [claude-notion](https://gi
 | Component | Model | Cost (per M tokens) | Why |
 |-----------|-------|---------------------|-----|
 | Fact extraction | Qwen 3.5 397B | $0.15 / $1.00 | Good extraction quality, low cost |
+| Session pre-filter | Deterministic | $0 | Rule-based, no LLM — saves ~51% extraction cost |
 | Artifact extraction | GLM-5 | $0.30 / $2.55 | High precision for autonomous actions |
 | Reconciliation | GLM-5 | $0.30 / $2.55 | False positives create noise |
 | Recall hook | None | $0 | Regex + SQLite, no LLM |
 
-Both models run via [OpenRouter](https://openrouter.ai/). GLM-5 is chosen for precision over cost — in a system that takes autonomous actions, false positives create garbage (wrong tasks, bad doc patches). See [ADR-004](docs/ADR-004-reconciliation-pipeline.md) for benchmark details.
+Both LLM models run via [OpenRouter](https://openrouter.ai/). GLM-5 is chosen for precision over cost — in a system that takes autonomous actions, false positives create garbage (wrong tasks, bad doc patches). See [ADR-004](docs/ADR-004-reconciliation-pipeline.md) for benchmark details.
 
-Typical cost: ~$0.30-0.50/day for active use (5-10 sessions/day).
+Typical cost: **~$0.30-0.50/day** for active use (5-10 sessions/day).
 
 ## Design Principles
 
+- **Hooks are the integration layer.** The recall hook makes memory automatic. Without it, you're back to manually telling Claude to check. Deterministic hooks > LLM-decided tool use for high-frequency operations.
 - **The daemon is a signal producer, not a decision maker.** It surfaces what changed. You decide about ambiguous signals.
 - **Three tiers of autonomy.** High-confidence reversible actions auto-execute. Medium gets proposed. Irreversible never happens without you.
 - **Write-through, not write-behind.** Facts, artifacts, and actions are persisted immediately — not batched at end-of-day.
@@ -313,8 +415,6 @@ Typical cost: ~$0.30-0.50/day for active use (5-10 sessions/day).
 - **Local-first.** Everything is files and SQLite. No cloud services except the LLM API calls. Your knowledge stays on your machine.
 
 ## Architecture
-
-For those who want to understand or contribute:
 
 ```
 ~/.knowledge-base/
@@ -338,6 +438,8 @@ For those who want to understand or contribute:
 ├── executor.py               # Action execution with permission model
 ├── briefing.py               # BRIEF.md generator
 ├── context_frame.py          # Dynamic context frame generator
+├── session_prefilter.py      # Deterministic pre-filter (51% cost reduction)
+├── session_memory.py         # Session memory management
 ├── reconcile.py              # Entity dedup and merge
 ├── kb.py                     # CLI query tool
 ├── schema.sql                # Database schema
@@ -350,9 +452,13 @@ For those who want to understand or contribute:
 ## Documentation
 
 - [ADR-001: Architecture](docs/ADR-001-architecture.md) — Why file-based, why extraction pipeline, alternatives considered
-- [ADR-002: Information Architecture](docs/ADR-002-information-architecture.md) — Entity/fact/relation data model
+- [ADR-002: Information Architecture](docs/ADR-002-information-architecture.md) — Entity/fact/relation data model, where each type of information belongs
 - [ADR-003: Domain-Aware Extraction](docs/ADR-003-domain-aware-extraction.md) — Context injection, domain routing
 - [ADR-004: Reconciliation Pipeline](docs/ADR-004-reconciliation-pipeline.md) — Full pipeline architecture, permission model, skill improvement
+- [ADR-005: Recall Application Layer](docs/ADR-005-recall-app-layer.md) — Recall hook design, three retrieval tiers
+- [ADR-006: Pipeline Domain Routing](docs/ADR-006-pipeline-domain-routing.md) — How artifacts route to the right external system
+- [ADR-007: Semantic Session Memory](docs/ADR-007-semantic-session-memory.md) — Session summary storage, FTS5 recall
+- [ADR-008: Session-Task Linking](docs/ADR-008-session-task-linking.md) — Connecting sessions to task board items
 - [Adapter Interface](docs/adapter-interface.md) — How to write external tool adapters (task board, docs)
 
 ## License
