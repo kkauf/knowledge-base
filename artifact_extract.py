@@ -114,7 +114,11 @@ For commitment_update artifacts, include these extra fields:
 
 For each artifact found, assess:
 1. TYPE: plan | analysis | framework | decision | roadmap | error_pattern | commitment_update
-2. VALUE: very_high (strategic, multi-paragraph, decision-bearing) | medium (useful reference) | low (nice-to-have)
+2. VALUE — be ruthless, most artifacts are medium or low:
+   - very_high: Would a CEO open this doc next quarter to make a decision? Examples: legal analysis with cited precedent, funnel conversion data with actionable findings, vendor selection with benchmarks, post-mortem with systemic lessons. Must contain ORIGINAL DATA or ANALYSIS — not just a plan or summary of what was discussed.
+   - medium: Useful reference but not decision-bearing. Examples: implementation plans, architecture inventories, debugging investigations, config audits, pricing research without strategy.
+   - low: Nice-to-have, ephemeral, or duplicates existing knowledge. Examples: trip logistics, session summaries, how-we-fixed-X narratives, test failure analyses.
+   CALIBRATION: In a typical week of sessions, expect ~5 very_high, ~15 medium, rest low. If you're rating >30% as very_high, you're too generous.
 3. PERSISTENCE CHECK: Look for signals that it was already saved:
    - Tool calls to notion-api.py, konban, Brain, MEMORY.md in subsequent messages
    - Explicit mentions: "Logged", "Created", "Saved to", "Added to Brain"
@@ -181,7 +185,7 @@ Return ONLY valid JSON:
       "sub_category": "Health",
       "key_terms": ["supplements", "Micro Ingredients", "order"],
       "summary": "1-2 sentence summary for the pending queue (NOT the artifact itself)",
-      "value": "very_high",
+      "value": "medium",
       "persistence_status": "not_persisted | persisted | partial",
       "persistence_evidence": "Description of what was/wasn't saved, or null",
       "content": "THE FULL ARTIFACT CONTENT — reproduced from the transcript as a complete, standalone document. Use markdown formatting. This is what gets saved to the knowledge base.",

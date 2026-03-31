@@ -40,7 +40,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (get_openrouter_url, get_reconciliation_model, get_kb_dir,
                     get_pending_file, get_konban_script, get_brain_script,
                     get_linear_script, get_skills_dir, get_api_key,
-                    get_http_referer, get_git_repos, get_consistency_cache_file)
+                    get_http_referer, get_git_repos, get_consistency_cache_file,
+                    cfg)
 
 # --- Config ---
 
@@ -777,13 +778,18 @@ def main():
                         help="Only run state consistency check (no artifact reconciliation)")
     parser.add_argument("--skip-consistency", action="store_true",
                         help="Skip live consistency check, use cached result instead")
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="Max artifacts per run (default: from config, currently 15)")
 
     args = parser.parse_args()
+
+    batch_size = args.batch_size or cfg("reconciliation_batch_size", 15)
 
     # Load artifacts first (needed to decide whether to load SKILL.md docs)
     artifacts_path = args.artifacts or str(PENDING_FILE)
     has_artifacts = False
     actionable = []
+    deferred = []
 
     if os.path.exists(artifacts_path):
         with open(artifacts_path) as f:
@@ -796,6 +802,13 @@ def main():
                       # persisted, but the task tracker still needs updating
                       or (a.get("type") == "commitment_update"
                           and a.get("update_type") == "completion")]
+
+        # Batch: process up to batch_size, keep the rest for next run
+        if len(actionable) > batch_size:
+            deferred = actionable[batch_size:]
+            actionable = actionable[:batch_size]
+            print(f"Batching: {len(actionable)} this run, {len(deferred)} deferred to next run")
+
         has_artifacts = len(actionable) > 0
 
     # Load system state (includes SKILL.md docs when error_patterns are pending)
@@ -955,6 +968,17 @@ def main():
 
     _write_timing_log("ok")
 
+    def _write_deferred():
+        """Write deferred artifacts back to the pending queue for next run."""
+        if artifacts_path == str(PENDING_FILE):
+            # Keep deferred artifacts (not yet reconciled) in the queue
+            remaining = deferred if deferred else []
+            PENDING_FILE.write_text(json.dumps(remaining, indent=2, default=str))
+            if deferred:
+                print(f"Queue updated: {len(deferred)} artifacts deferred to next run.")
+            else:
+                print("Pending artifacts cleared.")
+
     # Execute if requested
     if args.execute:
         executor_path = Path(__file__).resolve().parent / "executor.py"
@@ -969,16 +993,13 @@ def main():
                 timeout=120,
             )
 
-            if result.returncode == 0 and artifacts_path == str(PENDING_FILE):
-                PENDING_FILE.write_text("[]")
-                print("Pending artifacts cleared.")
+            if result.returncode == 0:
+                _write_deferred()
         else:
             print(f"Executor not found at {executor_path}")
     else:
-        # Clear pending since we've reconciled (action plan is saved or displayed)
-        if artifacts_path == str(PENDING_FILE):
-            PENDING_FILE.write_text("[]")
-            print("Pending artifacts cleared.")
+        # Clear processed artifacts (action plan is saved or displayed)
+        _write_deferred()
 
 
 if __name__ == "__main__":

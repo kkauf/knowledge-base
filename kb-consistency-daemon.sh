@@ -1,8 +1,8 @@
 #!/bin/bash
-# State consistency check daemon
-# Runs the consistency check independently and caches the result.
+# State consistency + reconciliation daemon
+# Runs consistency check AND reconciles pending artifacts (batched).
 # Designed to run via launchd every 4 hours.
-# Result is read by standup via --skip-consistency flag.
+# Consistency result is cached for standup via --skip-consistency flag.
 
 set -uo pipefail
 
@@ -22,14 +22,15 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
 }
 
-log "Starting consistency check"
+log "Starting consistency + reconciliation"
 
-# Run consistency-only mode — loads system state, calls GLM-5, caches result
-python3 "$REPO_DIR/pipeline_reconcile.py" --consistency-only >> "$LOG" 2>&1
+# Run full pipeline: consistency check + artifact reconciliation + execution
+# Batching is handled by pipeline_reconcile.py (default: 15 artifacts per run)
+python3 "$REPO_DIR/pipeline_reconcile.py" --execute >> "$LOG" 2>&1
 EXIT_CODE=$?
 
 if [ "$EXIT_CODE" -eq 0 ]; then
-    log "Consistency check complete"
+    log "Consistency + reconciliation complete"
 else
-    log "Consistency check failed (exit $EXIT_CODE)"
+    log "Pipeline failed (exit $EXIT_CODE)"
 fi
