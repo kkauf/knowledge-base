@@ -231,29 +231,49 @@ _konban_all_cache: list[str] | None = None
 
 
 def _load_all_konban_titles() -> list[str]:
-    """Load ALL Konban task titles (including Done/Grave) for dedup."""
+    """Load ALL task/item titles for dedup — Konban (including Done/Grave) + Roadmap.
+
+    Cross-references both databases so the daemon doesn't create Konban tasks
+    for work already tracked on the Roadmap (e.g., "Care Pathway Funnel Experiment").
+    """
     global _konban_all_cache
     if _konban_all_cache is not None:
         return _konban_all_cache
 
-    if not KONBAN_SCRIPT or not KONBAN_SCRIPT.exists():
-        _konban_all_cache = []
-        return _konban_all_cache
-
-    exit_code, stdout, stderr = run_command(
-        ["python3", str(KONBAN_SCRIPT), "all"], timeout=60
-    )
     titles = []
-    if exit_code == 0 and stdout:
-        for line in stdout.splitlines():
-            # Format: "Status | Priority | Timebox | Due | Title [page_id]"
-            parts = line.split(" | ")
-            if len(parts) >= 5:
-                # Last part is "Title [page_id]"
-                title_part = " | ".join(parts[4:])
-                # Strip the trailing [page_id]
-                title_clean = re.sub(r'\s*\[[0-9a-f-]+\]\s*$', '', title_part)
-                titles.append(title_clean)
+
+    # Load Konban tasks
+    if KONBAN_SCRIPT and KONBAN_SCRIPT.exists():
+        exit_code, stdout, stderr = run_command(
+            ["python3", str(KONBAN_SCRIPT), "all"], timeout=60
+        )
+        if exit_code == 0 and stdout:
+            for line in stdout.splitlines():
+                # Format: "Status | Priority | Timebox | Due | Title [page_id]"
+                parts = line.split(" | ")
+                if len(parts) >= 5:
+                    title_part = " | ".join(parts[4:])
+                    title_clean = re.sub(r'\s*\[[0-9a-f-]+\]\s*$', '', title_part)
+                    titles.append(title_clean)
+
+    # Load Roadmap items (prevents daemon creating Konban tasks for roadmap work)
+    roadmap_script = get_skills_dir() / "roadmap" / "roadmap-api.py"
+    if roadmap_script.exists():
+        exit_code, stdout, stderr = run_command(
+            ["python3", str(roadmap_script), "all"], timeout=30
+        )
+        if exit_code == 0 and stdout:
+            for line in stdout.splitlines():
+                if line.startswith("Status") or line.startswith("---") or not line.strip():
+                    continue
+                # Strip trailing [page_id], then extract title after the last "- " separator
+                clean = re.sub(r'\s*\[[0-9a-f-]+\]\s*$', '', line).strip()
+                # Title follows the shipped column (always "-" or a date)
+                # Split on 2+ spaces to find columns, title is the last segment
+                segments = re.split(r'\s{2,}', clean)
+                if len(segments) >= 3:
+                    titles.append(segments[-1].strip())
+
     _konban_all_cache = titles
     return _konban_all_cache
 
